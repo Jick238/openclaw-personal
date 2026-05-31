@@ -5,6 +5,7 @@ import {
   applyAgentCompactionSettingsFromConfigMock,
   buildEmbeddedSystemPromptMock,
   contextEngineCompactMock,
+  createCompactHooksRuntimePlan,
   createAgentSessionMock,
   createPreparedEmbeddedAgentSettingsManagerMock,
   createOpenClawCodingToolsMock,
@@ -494,6 +495,69 @@ describe("compactEmbeddedAgentSessionDirect hooks", () => {
       (sessionOptions.customTools as Array<{ name: string }>).map((tool) => tool.name),
     ).toEqual(["healthy_lookup"]);
     expect(sessionOptions.tools).toEqual(["healthy_lookup"]);
+  });
+
+  it("quarantines unserializable schemas before compaction provider normalization", async () => {
+    resolveContextEngineMock.mockResolvedValueOnce({
+      info: { ownsCompaction: false },
+      compact: contextEngineCompactMock,
+    });
+    const circularSchema: Record<string, unknown> = {
+      type: "object",
+      properties: {},
+    };
+    circularSchema.self = circularSchema;
+    createOpenClawCodingToolsMock.mockReturnValueOnce([
+      {
+        name: "mockplugin_lookup",
+        label: "Mock Lookup",
+        description: "Look up safe data.",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ text: "ok" }),
+      },
+      {
+        name: "fuzzplugin_circular_schema",
+        label: "Fuzz Circular Schema",
+        description: "Tool with provider-hostile schema metadata.",
+        parameters: circularSchema,
+        execute: async () => ({ text: "bad" }),
+      },
+    ] as never);
+    const runtimePlan = createCompactHooksRuntimePlan({
+      provider: "openai",
+      modelId: "fake",
+      modelApi: "responses",
+    });
+    const normalize = vi.fn((tools: Array<{ parameters: unknown }>) => {
+      for (const tool of tools) {
+        JSON.stringify(tool.parameters);
+      }
+      return tools;
+    });
+    runtimePlan.tools.normalize = normalize as never;
+
+    await compactEmbeddedAgentSessionDirect({
+      sessionId: "session-1",
+      sessionKey: "agent:main:session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp/workspace",
+      runId: "run-fuzzplugin-compaction-quarantine",
+      runtimePlan,
+    });
+
+    expect(normalize).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          name: "mockplugin_lookup",
+        }),
+      ],
+      expect.any(Object),
+    );
+    const sessionOptions = expectRecordFields(mockCallArg(createAgentSessionMock), {});
+    expect(
+      (sessionOptions.customTools as Array<{ name: string }>).map((tool) => tool.name),
+    ).toEqual(["mockplugin_lookup"]);
+    expect(sessionOptions.tools).toEqual(["mockplugin_lookup"]);
   });
 
   it("clamps the caller context token budget to the compaction model", async () => {

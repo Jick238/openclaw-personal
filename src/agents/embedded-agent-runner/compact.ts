@@ -112,7 +112,10 @@ import {
 import { createAgentSession, estimateTokens, SessionManager } from "../sessions/index.js";
 import { detectRuntimeShell } from "../shell-utils.js";
 import { filterRuntimeCompatibleTools } from "../tool-schema-projection.js";
-import { logRuntimeToolSchemaQuarantine } from "../tool-schema-quarantine.js";
+import {
+  filterProviderNormalizableRuntimeTools,
+  logRuntimeToolSchemaQuarantine,
+} from "../tool-schema-quarantine.js";
 import {
   classifyCompactionReason,
   formatUnknownCompactionReasonDetail,
@@ -826,8 +829,17 @@ async function compactEmbeddedAgentSessionDirectOnce(
       modelApi: model.api,
       model,
     };
+    const providerNormalizableToolsRaw =
+      toolsEnabled && toolsRaw.length > 0
+        ? filterProviderNormalizableRuntimeTools({
+            tools: toolsRaw,
+            runId,
+            sessionKey: params.sessionKey,
+            sessionId: params.sessionId,
+          })
+        : [];
     const tools = runtimePlan.tools.normalize(
-      toolsEnabled ? toolsRaw : [],
+      providerNormalizableToolsRaw,
       runtimePlanModelContext,
     );
     const bundleMcpRuntime = toolsEnabled
@@ -872,10 +884,19 @@ async function compactEmbeddedAgentSessionDirectOnce(
       senderE164: params.senderE164,
       warn: (message) => log.warn(message),
     });
-    const normalizedBundledTools =
+    const providerNormalizableBundledTools =
       filteredBundledTools.length > 0
-        ? runtimePlan.tools.normalize(filteredBundledTools, runtimePlanModelContext)
-        : filteredBundledTools;
+        ? filterProviderNormalizableRuntimeTools({
+            tools: filteredBundledTools,
+            runId,
+            sessionKey: params.sessionKey,
+            sessionId: params.sessionId,
+          })
+        : [];
+    const normalizedBundledTools =
+      providerNormalizableBundledTools.length > 0
+        ? runtimePlan.tools.normalize(providerNormalizableBundledTools, runtimePlanModelContext)
+        : providerNormalizableBundledTools;
     const projectedEffectiveTools = [...tools, ...normalizedBundledTools];
     const toolSchemaProjection = filterRuntimeCompatibleTools(projectedEffectiveTools);
     logRuntimeToolSchemaQuarantine({

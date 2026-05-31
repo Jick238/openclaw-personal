@@ -10,6 +10,7 @@ import {
   clearMemoryPluginState,
   registerMemoryPromptSection,
 } from "../../../plugins/memory-state.js";
+import type { AnyAgentTool } from "../../tools/common.js";
 import {
   type AttemptContextEngine,
   buildLoopPromptCacheInfo,
@@ -294,9 +295,9 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
         execute: async () => ({ text: "ok" }),
       },
       {
-        name: "dofbot_move_angles",
-        label: "Dofbot Move Angles",
-        description: "Move robot joints.",
+        name: "fuzzplugin_move_delta",
+        label: "Fuzz Move Delta",
+        description: "Move synthetic joints.",
         parameters: {
           type: "object",
           properties: {
@@ -338,6 +339,126 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     const customTools = requireRecords(sessionOptions.customTools, "customTools");
     expect(customTools.map((tool) => tool.name)).toEqual(["healthy_lookup"]);
     expect(activeToolNames).toEqual([["healthy_lookup"]]);
+  });
+
+  it("quarantines non-serializable tool schemas before creating the session", async () => {
+    const circularSchema = {
+      type: "object",
+    } as { self?: unknown; type: string };
+    circularSchema.self = circularSchema;
+    const nonSerializableTool = {
+      name: "fuzzplugin_move_delta",
+      label: "Fuzz Move Delta",
+      description: "Move synthetic joints.",
+      parameters: circularSchema,
+      execute: async () => ({ text: "bad" }),
+    };
+    hoisted.createOpenClawCodingToolsMock.mockReturnValue([
+      {
+        name: "healthy_lookup",
+        label: "Healthy Lookup",
+        description: "Look up safe data.",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ text: "ok" }),
+      },
+      nonSerializableTool,
+    ]);
+
+    const activeToolNames: string[][] = [];
+    await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        disableTools: false,
+        config: {
+          tools: {
+            codeMode: { enabled: false },
+            toolSearch: false,
+          },
+        } as OpenClawConfig,
+      },
+      createSession: () => {
+        const session = createDefaultEmbeddedSession();
+        session.setActiveToolsByName = (toolNames) => {
+          activeToolNames.push([...toolNames]);
+        };
+        return session;
+      },
+    });
+
+    const sessionOptions = mockParams(
+      hoisted.createAgentSessionMock,
+      0,
+      "createAgentSession options",
+    );
+    const customTools = requireRecords(sessionOptions.customTools, "customTools");
+    expect(customTools.map((tool) => tool.name)).toEqual(["healthy_lookup"]);
+    expect(activeToolNames).toEqual([["healthy_lookup"]]);
+  });
+
+  it("does not report quarantines for bundled tools removed by allowlist policy", async () => {
+    hoisted.createOpenClawCodingToolsMock.mockReturnValue([]);
+    hoisted.getOrCreateSessionMcpRuntimeMock.mockResolvedValue({});
+    const circularSchema = {
+      type: "object",
+    } as { self?: unknown; type: string };
+    circularSchema.self = circularSchema;
+    const policyDisabledTool = {
+      name: "fuzzplugin__disabled_circular_schema",
+      label: "Disabled Circular Schema",
+      description: "Policy-disabled synthetic tool.",
+      parameters: circularSchema,
+      execute: async () => ({ content: [], details: undefined }),
+    } satisfies AnyAgentTool;
+    const healthyTool = {
+      name: "mockserver__healthy_lookup",
+      label: "Healthy Lookup",
+      description: "Look up safe data.",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ content: [], details: undefined }),
+    } satisfies AnyAgentTool;
+    hoisted.materializeBundleMcpToolsForRunMock.mockResolvedValue({
+      tools: [policyDisabledTool, healthyTool],
+      dispose: async () => {},
+    });
+
+    const activeToolNames: string[][] = [];
+    await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        disableTools: false,
+        toolsAllow: ["mockserver__healthy_lookup"],
+        config: {
+          tools: {
+            codeMode: { enabled: false },
+            toolSearch: false,
+          },
+        } as OpenClawConfig,
+      },
+      createSession: () => {
+        const session = createDefaultEmbeddedSession();
+        session.setActiveToolsByName = (toolNames) => {
+          activeToolNames.push([...toolNames]);
+        };
+        return session;
+      },
+    });
+
+    const sessionOptions = mockParams(
+      hoisted.createAgentSessionMock,
+      0,
+      "createAgentSession options",
+    );
+    const customTools = requireRecords(sessionOptions.customTools, "customTools");
+    expect(customTools.map((tool) => tool.name)).toEqual(["mockserver__healthy_lookup"]);
+    expect(activeToolNames).toEqual([["mockserver__healthy_lookup"]]);
+    const blockedEvents = hoisted.emitTrustedDiagnosticEventMock.mock.calls
+      .map((call) => requireRecord(call[0], "diagnostic event"))
+      .filter((event) => event.type === "tool.execution.blocked");
+    expect(blockedEvents).toEqual([]);
   });
 
   it("keeps the embedded system prompt after active tool selection", async () => {

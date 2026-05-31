@@ -175,7 +175,9 @@ export const rotateTranscriptAfterCompactionMock: Mock<
 }));
 export const enqueueCommandInLaneMock = vi.fn((_lane: unknown, task: () => unknown) => task());
 
-function createCompactHooksRuntimePlan(params: BuildAgentRuntimePlanParams): AgentRuntimePlan {
+export function createCompactHooksRuntimePlan(
+  params: BuildAgentRuntimePlanParams,
+): AgentRuntimePlan {
   const modelApi = params.modelApi ?? params.model?.api ?? undefined;
   const transcriptPolicy = {
     sanitizeMode: "full" as const,

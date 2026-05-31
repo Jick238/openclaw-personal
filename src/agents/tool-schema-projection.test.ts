@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  filterProviderNormalizableTools,
   filterRuntimeCompatibleTools,
   inspectRuntimeToolInputSchemas,
   projectRuntimeToolInputSchema,
@@ -29,15 +30,15 @@ describe("runtime tool input schema projection", () => {
     expect(
       inspectRuntimeToolInputSchemas([
         {
-          name: "dofbot_move_angles",
+          name: "fuzzplugin_move_delta",
           parameters: { type: "array", items: { type: "number" } },
         },
       ] as never),
     ).toEqual([
       {
-        toolName: "dofbot_move_angles",
+        toolName: "fuzzplugin_move_delta",
         toolIndex: 0,
-        violations: ['dofbot_move_angles.parameters.type must be "object"'],
+        violations: ['fuzzplugin_move_delta.parameters.type must be "object"'],
       },
     ]);
   });
@@ -86,7 +87,7 @@ describe("runtime tool input schema projection", () => {
       parameters: { type: "object", properties: {} },
     };
     const broken = {
-      name: "dofbot_move_angles",
+      name: "fuzzplugin_move_delta",
       parameters: { type: "array", items: { type: "number" } },
     };
 
@@ -94,9 +95,42 @@ describe("runtime tool input schema projection", () => {
       tools: [healthy],
       diagnostics: [
         {
-          toolName: "dofbot_move_angles",
+          toolName: "fuzzplugin_move_delta",
           toolIndex: 1,
-          violations: ['dofbot_move_angles.parameters.type must be "object"'],
+          violations: ['fuzzplugin_move_delta.parameters.type must be "object"'],
+        },
+      ],
+    });
+  });
+
+  it("keeps provider-repairable schemas before provider normalization", () => {
+    const missingParameters = {
+      name: "mockplugin_missing_parameters",
+      parameters: undefined,
+    };
+    const nonObjectSchema = {
+      name: "fuzzplugin_move_delta",
+      parameters: { type: "array", items: { type: "number" } },
+    };
+    const circularSchema = {
+      name: "fuzzplugin_circular_schema",
+      parameters: {} as { self?: unknown },
+    };
+    circularSchema.parameters.self = circularSchema.parameters;
+
+    expect(
+      filterProviderNormalizableTools([
+        missingParameters,
+        nonObjectSchema,
+        circularSchema,
+      ] as never),
+    ).toEqual({
+      tools: [missingParameters, nonObjectSchema],
+      diagnostics: [
+        {
+          toolName: "fuzzplugin_circular_schema",
+          toolIndex: 2,
+          violations: ["fuzzplugin_circular_schema.parameters is not JSON-serializable"],
         },
       ],
     });

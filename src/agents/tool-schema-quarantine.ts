@@ -1,7 +1,10 @@
 import { emitTrustedDiagnosticEvent } from "../infra/diagnostic-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
-import type { RuntimeToolSchemaDiagnostic } from "./tool-schema-projection.js";
+import {
+  filterProviderNormalizableTools,
+  type RuntimeToolSchemaDiagnostic,
+} from "./tool-schema-projection.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
 const log = createSubsystemLogger("agents/tools");
@@ -38,4 +41,21 @@ export function logRuntimeToolSchemaQuarantine(params: {
   log.warn(
     `[tools] quarantined ${params.diagnostics.length} unsupported tool schema${params.diagnostics.length === 1 ? "" : "s"} before model runtime projection: ${summary}. Run openclaw doctor for details.`,
   );
+}
+
+export function filterProviderNormalizableRuntimeTools(params: {
+  tools: readonly AnyAgentTool[];
+  runId: string;
+  sessionKey?: string;
+  sessionId?: string;
+}): AnyAgentTool[] {
+  const projection = filterProviderNormalizableTools(params.tools);
+  logRuntimeToolSchemaQuarantine({
+    diagnostics: projection.diagnostics,
+    tools: params.tools,
+    runId: params.runId,
+    sessionKey: params.sessionKey,
+    sessionId: params.sessionId,
+  });
+  return [...projection.tools];
 }
