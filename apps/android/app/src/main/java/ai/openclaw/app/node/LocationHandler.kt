@@ -72,11 +72,14 @@ class LocationHandler private constructor(
     locationPreciseEnabled = locationPreciseEnabled,
   )
 
+  /** Reports whether precise GPS-backed location can be requested from Android. */
   fun hasFineLocationPermission(): Boolean = dataSource.hasFinePermission(appContext)
 
+  /** Reports whether network/coarse location can be requested from Android. */
   fun hasCoarseLocationPermission(): Boolean = dataSource.hasCoarsePermission(appContext)
 
   companion object {
+    /** Creates a handler with injected location state for permission and payload tests. */
     internal fun forTesting(
       appContext: Context,
       dataSource: LocationDataSource,
@@ -93,6 +96,7 @@ class LocationHandler private constructor(
       )
   }
 
+  /** Handles location.get with foreground, permission, and user precision gates applied. */
   suspend fun handleLocationGet(paramsJson: String?): GatewaySession.InvokeResult {
     if (!isForeground()) {
       // Android foreground restrictions and user expectation keep live location tied to the visible app.
@@ -109,9 +113,10 @@ class LocationHandler private constructor(
     }
     val (maxAgeMs, timeoutMs, desiredAccuracy) = parseLocationParams(paramsJson)
     val preciseEnabled = locationPreciseEnabled()
+    // Gateway requests are advisory; Android permission and user settings decide
+    // whether precise capture is actually allowed for this invocation.
     val accuracy =
       when (desiredAccuracy) {
-        // User/device settings can downgrade precise requests to balanced without failing the invoke.
         "precise" -> if (preciseEnabled && dataSource.hasFinePermission(appContext)) "precise" else "balanced"
         "coarse" -> "coarse"
         else -> if (preciseEnabled && dataSource.hasFinePermission(appContext)) "precise" else "balanced"
