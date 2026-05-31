@@ -1,5 +1,6 @@
 package ai.openclaw.app
 
+/** Normalizes blank gateway session keys to the legacy main session alias. */
 internal fun normalizeMainKey(raw: String?): String {
   val trimmed = raw?.trim()
   return if (!trimmed.isNullOrEmpty()) trimmed else "main"

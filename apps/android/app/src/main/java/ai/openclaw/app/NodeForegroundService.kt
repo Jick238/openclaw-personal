@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
+/** Foreground service that keeps the Android node connection and voice capture visible to the OS. */
 class NodeForegroundService : Service() {
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private var notificationJob: Job? = null
@@ -36,6 +37,8 @@ class NodeForegroundService : Service() {
       stopSelf()
       return
     }
+    // Split connection and capture flows before combining so notification text
+    // can update without restarting runtime-owned connection work.
     notificationJob =
       scope.launch {
         combine(
@@ -268,6 +271,7 @@ private fun String?.toVoiceCaptureMode(): VoiceCaptureMode =
     it.name == this
   } ?: VoiceCaptureMode.Off
 
+/** Connection fields that drive foreground notification title/body text. */
 private data class VoiceNotificationBase(
   val status: String,
   val server: String?,
@@ -275,6 +279,7 @@ private data class VoiceNotificationBase(
   val mode: VoiceCaptureMode,
 )
 
+/** Voice capture fields that affect foreground-service type and suffix. */
 private data class VoiceNotificationCapture(
   val micEnabled: Boolean,
   val micListening: Boolean,
@@ -282,6 +287,7 @@ private data class VoiceNotificationCapture(
   val talkSpeaking: Boolean,
 )
 
+/** Aggregated notification state from runtime flows. */
 private data class VoiceNotificationState(
   val base: VoiceNotificationBase,
   val capture: VoiceNotificationCapture,
