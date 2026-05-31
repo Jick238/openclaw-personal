@@ -696,28 +696,36 @@ export type AgentHarnessEvent<
   TPromptTemplate extends PromptTemplate = PromptTemplate,
 > = AgentEvent | AgentHarnessOwnEvent<TSkill, TPromptTemplate>;
 
+/** Hook result for mutating the initial prompt run before the agent starts. */
 export interface BeforeAgentStartResult {
+  /** Replacement messages for the prompt run. */
   messages?: AgentMessage[];
+  /** Replacement system prompt for the prompt run. */
   systemPrompt?: string;
 }
 
+/** Hook result for replacing the full context message list before provider conversion. */
 export interface ContextResult {
   messages: AgentMessage[];
 }
 
+/** Hook result for patching provider request options before payload construction. */
 export interface BeforeProviderRequestResult {
   streamOptions?: AgentHarnessStreamOptionsPatch;
 }
 
+/** Hook result for replacing the provider payload after construction. */
 export interface BeforeProviderPayloadResult {
   payload: unknown;
 }
 
+/** Hook result for blocking a tool call before execution. */
 export interface ToolCallResult {
   block?: boolean;
   reason?: string;
 }
 
+/** Hook patch for a completed tool result before it is persisted/emitted. */
 export interface ToolResultPatch {
   content?: Array<TextContent | ImageContent>;
   details?: unknown;
@@ -725,11 +733,13 @@ export interface ToolResultPatch {
   terminate?: boolean;
 }
 
+/** Hook result for cancelling or replacing a planned compaction. */
 export interface SessionBeforeCompactResult {
   cancel?: boolean;
   compaction?: CompactResult;
 }
 
+/** Hook result for cancelling, labeling, or supplying branch-summary behavior before tree navigation. */
 export interface SessionBeforeTreeResult {
   cancel?: boolean;
   summary?: { summary: string; details?: unknown };
@@ -738,6 +748,7 @@ export interface SessionBeforeTreeResult {
   label?: string;
 }
 
+/** Typed return values expected from AgentHarness hook handlers by event type. */
 export type AgentHarnessEventResultMap = {
   before_agent_start: BeforeAgentStartResult | undefined;
   context: ContextResult | undefined;
@@ -759,15 +770,18 @@ export type AgentHarnessEventResultMap = {
   settled: undefined;
 };
 
+/** Options for a prompt submitted through AgentHarness. */
 export interface AgentHarnessPromptOptions {
   images?: ImageContent[];
 }
 
+/** Queued messages removed by an abort operation. */
 export interface AbortResult {
   clearedSteer: AgentMessage[];
   clearedFollowUp: AgentMessage[];
 }
 
+/** Compaction data supplied by hooks or returned from compaction preparation. */
 export interface CompactResult {
   summary: string;
   firstKeptEntryId: string;
@@ -775,18 +789,21 @@ export interface CompactResult {
   details?: unknown;
 }
 
+/** Result of moving the active session-tree leaf. */
 export interface NavigateTreeResult {
   cancelled: boolean;
   editorText?: string;
   summaryEntry?: BranchSummaryEntry;
 }
 
+/** Settings that control automatic context compaction. */
 export interface CompactionSettings {
   enabled: boolean;
   reserveTokens: number;
   keepRecentTokens: number;
 }
 
+/** Prepared compaction inputs exposed to hooks before a summary is generated. */
 export interface CompactionPreparation {
   firstKeptEntryId: string;
   messagesToSummarize: AgentMessage[];
@@ -798,12 +815,14 @@ export interface CompactionPreparation {
   settings: CompactionSettings;
 }
 
+/** File operations accumulated from summarized transcript ranges. */
 export interface FileOperations {
   read: Set<string>;
   written: Set<string>;
   edited: Set<string>;
 }
 
+/** Prepared branch navigation inputs exposed to hooks before a summary is generated. */
 export interface TreePreparation {
   targetId: string;
   oldLeafId: string | null;
@@ -815,6 +834,7 @@ export interface TreePreparation {
   label?: string;
 }
 
+/** Options for generating a branch summary. */
 export interface GenerateBranchSummaryOptions {
   model: Model;
   apiKey: string;
@@ -827,12 +847,14 @@ export interface GenerateBranchSummaryOptions {
   reserveTokens?: number;
 }
 
+/** Generated branch summary text and file-operation metadata. */
 export interface BranchSummaryResult {
   summary: string;
   readFiles: string[];
   modifiedFiles: string[];
 }
 
+/** Construction options for AgentHarness. */
 export interface AgentHarnessOptions<
   TSkill extends Skill = Skill,
   TPromptTemplate extends PromptTemplate = PromptTemplate,
