@@ -53,12 +53,18 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 
+/**
+ * Gateway payload returned when Android starts a push-to-talk capture.
+ */
 data class TalkPttStartPayload(
   val captureId: String,
 ) {
   fun toJson(): String = """{"captureId":"$captureId"}"""
 }
 
+/**
+ * Gateway payload returned when a push-to-talk capture ends or is cancelled.
+ */
 data class TalkPttStopPayload(
   val captureId: String,
   val transcript: String?,
@@ -162,6 +168,7 @@ class TalkModeManager internal constructor(
   @Volatile private var realtimeSessionId: String? = null
   private var realtimeCaptureJob: Job? = null
   private var realtimeAppendJob: Job? = null
+  // Realtime tool calls can complete before their chat final arrives; cache by call/run id until both sides meet.
   private val realtimeToolRuns = LinkedHashMap<String, RealtimeToolRun>()
   private val pendingRealtimeToolCalls = LinkedHashSet<String>()
   private val pendingRealtimeToolCompletions = LinkedHashMap<String, RealtimeToolCompletion>()
@@ -235,6 +242,7 @@ class TalkModeManager internal constructor(
       _statusText.value = "Gateway not connected"
       throw IllegalStateException("UNAVAILABLE: Gateway not connected")
     }
+    // PTT begin is idempotent so gateway retries don't start multiple recognizers.
     activePttCaptureId?.let { return TalkPttStartPayload(captureId = it) }
 
     stopSpeaking(resetInterrupt = false)
@@ -340,6 +348,7 @@ class TalkModeManager internal constructor(
     val completion = CompletableDeferred<TalkPttStopPayload>()
     pttCompletion = completion
     pttAutoStopEnabled = true
+    // One-shot PTT auto-stops on silence or timeout; manual PTT waits for an explicit stop call.
     startSilenceMonitor()
     pttTimeoutJob =
       scope.launch {

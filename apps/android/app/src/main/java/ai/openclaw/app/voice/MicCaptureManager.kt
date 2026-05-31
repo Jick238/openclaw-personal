@@ -26,6 +26,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
+/**
+ * UI transcript role emitted by microphone capture and assistant streaming.
+ */
 enum class VoiceConversationRole {
   User,
   Assistant,
@@ -99,6 +102,7 @@ class MicCaptureManager(
   private val messageQueue = ArrayDeque<String>()
   private val messageQueueLock = Any()
   private var flushedPartialTranscript: String? = null
+  // Correlates chat events with the idempotency key generated before sendChat returns.
   private var pendingRunId: String? = null
   private var pendingAssistantEntryId: String? = null
   private var gatewayConnected = false

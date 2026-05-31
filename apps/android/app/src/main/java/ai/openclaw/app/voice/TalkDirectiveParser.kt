@@ -7,6 +7,9 @@ import kotlinx.serialization.json.JsonPrimitive
 
 private val directiveJson = Json { ignoreUnknownKeys = true }
 
+/**
+ * Optional first-line JSON overrides for one Talk request.
+ */
 data class TalkDirective(
   val voiceId: String? = null,
   val modelId: String? = null,
@@ -24,6 +27,9 @@ data class TalkDirective(
   val once: Boolean? = null,
 )
 
+/**
+ * Parsed directive plus the utterance text after removing the directive line.
+ */
 data class TalkDirectiveParseResult(
   val directive: TalkDirective?,
   val stripped: String,
@@ -40,6 +46,7 @@ object TalkDirectiveParser {
     if (firstNonEmpty == -1) return TalkDirectiveParseResult(null, text, emptyList())
 
     val head = lines[firstNonEmpty].trim()
+    // Directives are accepted only as a complete first-line JSON object; spoken text remains plain text.
     if (!head.startsWith("{") || !head.endsWith("}")) {
       return TalkDirectiveParseResult(null, text, emptyList())
     }
@@ -88,6 +95,7 @@ object TalkDirectiveParser {
 
     if (!hasDirective) return TalkDirectiveParseResult(null, text, emptyList())
 
+    // Keep alias matching case-insensitive so dictated JSON can use snake/camel variants.
     val knownKeys =
       setOf(
         "voice",
