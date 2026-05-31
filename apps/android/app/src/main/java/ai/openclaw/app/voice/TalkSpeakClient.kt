@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+/** Decoded talk.speak audio bytes plus provider metadata needed for Android playback. */
 internal data class TalkSpeakAudio(
   val bytes: ByteArray,
   val provider: String,
@@ -16,14 +17,17 @@ internal data class TalkSpeakAudio(
 
 /** Result of requesting remote speech synthesis through the gateway. */
 internal sealed interface TalkSpeakResult {
+  /** Remote synthesis returned audio that Android can route to playback. */
   data class Success(
     val audio: TalkSpeakAudio,
   ) : TalkSpeakResult
 
+  /** Provider or config absence allows Android local TTS to handle the reply. */
   data class FallbackToLocal(
     val message: String,
   ) : TalkSpeakResult
 
+  /** Request, payload, or audio errors that should stay visible to the caller. */
   data class Failure(
     val message: String,
   ) : TalkSpeakResult
@@ -133,6 +137,7 @@ internal data class TalkSpeakRequest(
   val latencyTier: Int? = null,
 ) {
   companion object {
+    /** Converts parsed inline talk directives into the gateway RPC payload shape. */
     fun from(
       text: String,
       directive: TalkDirective?,

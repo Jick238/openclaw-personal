@@ -16,6 +16,7 @@ internal interface TalkAudioPlaying {
   /** Plays one assistant reply, replacing any active playback. */
   suspend fun play(audio: TalkSpeakAudio)
 
+  /** Cancels any active assistant reply playback. */
   fun stop()
 }
 
@@ -40,6 +41,7 @@ internal class TalkAudioPlayer(
     }
   }
 
+  /** Resolves playback mode from the metadata carried with a talk.speak response. */
   internal fun resolvePlaybackMode(audio: TalkSpeakAudio): TalkPlaybackMode =
     resolvePlaybackMode(
       outputFormat = audio.outputFormat,
