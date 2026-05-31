@@ -269,10 +269,12 @@ class MainViewModel(
     prefs.setGatewayPassword(value)
   }
 
+  /** Clears setup credentials through the runtime so active gateway sessions drop stale auth state. */
   fun resetGatewaySetupAuth() {
     ensureRuntime().resetGatewaySetupAuth()
   }
 
+  /** Marks onboarding complete and starts the runtime before UI observes connected-state flows. */
   fun setOnboardingCompleted(value: Boolean) {
     if (value) {
       ensureRuntime()
@@ -280,6 +282,7 @@ class MainViewModel(
     prefs.setOnboardingCompleted(value)
   }
 
+  /** Re-enters gateway setup after disconnecting and clearing one-time setup credentials. */
   fun pairNewGateway() {
     runtimeRef.value?.disconnect()
     resetGatewaySetupAuth()
@@ -287,6 +290,7 @@ class MainViewModel(
     prefs.setOnboardingCompleted(false)
   }
 
+  /** Acknowledges the one-shot request that opens onboarding at the gateway setup step. */
   fun clearGatewaySetupStartRequest() {
     _startOnboardingAtGatewaySetup.value = false
   }
@@ -330,6 +334,7 @@ class MainViewModel(
     ensureRuntime().setVoiceScreenActive(active)
   }
 
+  /** Routes assistant intents into chat, either as a draft or queued auto-send prompt. */
   fun handleAssistantLaunch(request: AssistantLaunchRequest) {
     _requestedHomeDestination.value = HomeDestination.Chat
     if (request.autoSend) {
