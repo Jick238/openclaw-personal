@@ -15,6 +15,9 @@ class DebugHandler(
   private val appContext: Context,
   private val identityStore: DeviceIdentityStore,
 ) {
+  /**
+   * Runs an Ed25519 self-test and returns redacted diagnostics for debug builds.
+   */
   fun handleEd25519(): GatewaySession.InvokeResult {
     if (!BuildConfig.DEBUG) {
       return GatewaySession.InvokeResult.error(code = "UNAVAILABLE", message = "debug commands are disabled in release builds")
@@ -76,6 +79,9 @@ class DebugHandler(
     }
   }
 
+  /**
+   * Returns a filtered logcat snapshot plus CameraX debug log for debug builds.
+   */
   fun handleLogs(): GatewaySession.InvokeResult {
     if (!BuildConfig.DEBUG) {
       return GatewaySession.InvokeResult.error(code = "UNAVAILABLE", message = "debug commands are disabled in release builds")

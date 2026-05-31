@@ -13,6 +13,9 @@ internal object NodePresenceAliveBeacon {
   const val MIN_SUCCESS_INTERVAL_MS: Long = 10 * 60 * 1000
   private const val MAX_RESPONSE_JSON_CHARS: Int = 16 * 1024
 
+  /**
+   * Source of the liveness event, serialized as gateway-stable wire values.
+   */
   enum class Trigger(
     val rawValue: String,
   ) {
@@ -24,6 +27,9 @@ internal object NodePresenceAliveBeacon {
     Connect("connect"),
   }
 
+  /**
+   * Minimal gateway response fields used to decide whether a liveness event was accepted.
+   */
   data class ResponsePayload(
     val ok: Boolean?,
     val event: String?,
@@ -77,6 +83,7 @@ internal object NodePresenceAliveBeacon {
       pushTransport?.trim()?.takeIf { it.isNotEmpty() }?.let { put("pushTransport", JsonPrimitive(it)) }
     }.toString()
 
+  /** Parses the gateway response while rejecting empty, oversized, or malformed payloads. */
   fun decodeResponse(payloadJson: String?): ResponsePayload? {
     val raw = payloadJson?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     // Bound log/IPC responses before JSON parsing to avoid memory spikes from

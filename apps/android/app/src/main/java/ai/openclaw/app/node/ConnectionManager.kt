@@ -118,8 +118,10 @@ class ConnectionManager(
       debugBuild = BuildConfig.DEBUG,
     )
 
+  /** Builds the gateway-advertised node.invoke command list from current permission and feature state. */
   fun buildInvokeCommands(): List<String> = InvokeCommandRegistry.advertisedCommands(runtimeFlags())
 
+  /** Builds the gateway-advertised capability list from current permission and feature state. */
   fun buildCapabilities(): List<String> = InvokeCommandRegistry.advertisedCapabilities(runtimeFlags())
 
   /**
@@ -134,6 +136,7 @@ class ConnectionManager(
     }
   }
 
+  /** Human-readable Android device model used in gateway client metadata. */
   fun resolveModelIdentifier(): String? =
     listOfNotNull(Build.MANUFACTURER, Build.MODEL)
       .joinToString(" ")
@@ -153,6 +156,7 @@ class ConnectionManager(
     return "OpenClawAndroid/$version (Android $releaseLabel; SDK ${Build.VERSION.SDK_INT})"
   }
 
+  /** Client identity block shared by node and operator gateway sessions. */
   fun buildClientInfo(
     clientId: String,
     clientMode: String,
@@ -168,6 +172,7 @@ class ConnectionManager(
       modelIdentifier = resolveModelIdentifier(),
     )
 
+  /** Connect options for the Android node session that exposes phone capabilities. */
   fun buildNodeConnectOptions(): GatewayConnectOptions =
     GatewayConnectOptions(
       role = "node",
@@ -179,6 +184,7 @@ class ConnectionManager(
       userAgent = buildUserAgent(),
     )
 
+  /** Connect options for the Android operator session that drives approvals and UI actions. */
   fun buildOperatorConnectOptions(): GatewayConnectOptions =
     GatewayConnectOptions(
       role = "operator",
@@ -195,6 +201,7 @@ class ConnectionManager(
       userAgent = buildUserAgent(),
     )
 
+  /** Resolves persisted TLS pin policy for a concrete gateway endpoint. */
   fun resolveTlsParams(endpoint: GatewayEndpoint): GatewayTlsParams? {
     val stored = prefs.loadGatewayTlsFingerprint(endpoint.stableId)
     return resolveTlsParamsForEndpoint(endpoint, storedFingerprint = stored, manualTlsEnabled = manualTls())
