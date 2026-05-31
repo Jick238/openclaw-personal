@@ -118,10 +118,14 @@ fun ChatComposer(
     input = next.input
     lastAppliedDraft = next.lastAppliedDraft
     if (next.consumed) {
+      // Consume only after the composer state has accepted the draft so
+      // recomposition cannot reapply it over user edits.
       onDraftApplied()
     }
   }
 
+  // One in-flight run owns the composer actions; attachments alone are enough
+  // to send when the gateway is healthy.
   val canSend = pendingRunCount == 0 && (input.trim().isNotEmpty() || attachments.isNotEmpty()) && healthOk
   val sendBusy = pendingRunCount > 0
 
