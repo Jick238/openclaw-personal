@@ -15,6 +15,7 @@ import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
 import ai.openclaw.app.protocol.OpenClawTalkCommand
 
+/** Runtime state for SMS search, split so permission prompts are not reported as hard unavailability. */
 internal enum class SmsSearchAvailabilityReason {
   Available,
   PermissionRequired,
@@ -91,6 +92,7 @@ class InvokeDispatcher(
   private val motionActivityAvailable: () -> Boolean,
   private val motionPedometerAvailable: () -> Boolean,
 ) {
+  /** Dispatches one gateway node.invoke command after foreground and availability gates pass. */
   suspend fun handleInvoke(
     command: String,
     paramsJson: String?,
@@ -362,11 +364,15 @@ class InvokeDispatcher(
  * Talk-mode command adapter implemented by the voice subsystem.
  */
 interface TalkHandler {
+  /** Starts a push-to-talk capture session and keeps it open until stop or cancel. */
   suspend fun handlePttStart(paramsJson: String?): GatewaySession.InvokeResult
 
+  /** Finishes the active push-to-talk capture and submits recognized speech. */
   suspend fun handlePttStop(paramsJson: String?): GatewaySession.InvokeResult
 
+  /** Aborts the active push-to-talk capture without submitting speech. */
   suspend fun handlePttCancel(paramsJson: String?): GatewaySession.InvokeResult
 
+  /** Runs a bounded one-shot push-to-talk capture. */
   suspend fun handlePttOnce(paramsJson: String?): GatewaySession.InvokeResult
 }
