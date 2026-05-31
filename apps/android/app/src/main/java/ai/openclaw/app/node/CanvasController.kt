@@ -23,6 +23,9 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 
+/**
+ * Owns the Android WebView canvas surface used by canvas and A2UI commands.
+ */
 class CanvasController {
   enum class SnapshotFormat(
     val rawValue: String,
@@ -62,6 +65,7 @@ class CanvasController {
 
   fun attach(webView: WebView) {
     this.webView = webView
+    // Replay persisted state because WebView attachment can happen after gateway events arrive.
     reload()
     applyDebugStatus()
     applyHomeCanvasState()
@@ -113,6 +117,7 @@ class CanvasController {
     if (Looper.myLooper() == Looper.getMainLooper()) {
       block(wv)
     } else {
+      // WebView APIs must run on the main thread.
       wv.post { block(wv) }
     }
   }
@@ -246,6 +251,9 @@ class CanvasController {
     }
 
   companion object {
+    /**
+     * Parsed canvas.snapshot options used by invoke dispatch.
+     */
     data class SnapshotParams(
       val format: SnapshotFormat,
       val quality: Double?,
@@ -286,6 +294,7 @@ class CanvasController {
       if (!obj.containsKey("quality")) return null
       val q = obj.double("quality") ?: Double.NaN
       if (!q.isFinite()) return null
+      // Keep JPEG quality inside encoder-safe bounds; PNG ignores it.
       return q.coerceIn(0.1, 1.0)
     }
 
