@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 
+/**
+ * UI-facing bridge that exposes NodeRuntime and preference state as Compose-friendly StateFlows.
+ */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(
   app: Application,
@@ -39,6 +42,9 @@ class MainViewModel(
   private val _pendingAssistantAutoSend = MutableStateFlow<String?>(null)
   val pendingAssistantAutoSend: StateFlow<String?> = _pendingAssistantAutoSend
 
+  /**
+   * Lazily starts NodeRuntime and preserves the current foreground bit across startup.
+   */
   private fun ensureRuntime(): NodeRuntime {
     runtimeRef.value?.let { return it }
     val runtime = nodeApp.ensureRuntime()
@@ -47,6 +53,9 @@ class MainViewModel(
     return runtime
   }
 
+  /**
+   * Adapts a runtime StateFlow to a stable ViewModel StateFlow before runtime startup.
+   */
   private fun <T> runtimeState(
     initial: T,
     selector: (NodeRuntime) -> StateFlow<T>,
@@ -185,6 +194,9 @@ class MainViewModel(
   val sms: SmsManager
     get() = ensureRuntime().sms
 
+  /**
+   * Attaches Activity-owned permission and lifecycle seams after runtime initialization.
+   */
   fun attachRuntimeUi(
     owner: LifecycleOwner,
     permissionRequester: PermissionRequester,
@@ -195,6 +207,9 @@ class MainViewModel(
     runtime.sms.attachPermissionRequester(permissionRequester)
   }
 
+  /**
+   * Starts runtime on foreground entry only after onboarding has completed.
+   */
   fun setForeground(value: Boolean) {
     foreground = value
     val runtime =

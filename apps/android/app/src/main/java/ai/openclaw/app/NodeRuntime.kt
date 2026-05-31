@@ -75,11 +75,17 @@ import kotlinx.serialization.json.buildJsonObject
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
+/**
+ * Process runtime that owns gateway sessions, node command handlers, capture managers, and UI-facing state.
+ */
 class NodeRuntime(
   context: Context,
   val prefs: SecurePrefs = SecurePrefs(context.applicationContext),
   private val tlsFingerprintProbe: suspend (String, Int) -> GatewayTlsProbeResult = ::probeGatewayTlsFingerprint,
 ) {
+  /**
+   * Authentication material supplied by setup/manual connect flows before gateway session routing.
+   */
   data class GatewayConnectAuth(
     val token: String?,
     val bootstrapToken: String?,
@@ -251,6 +257,9 @@ class NodeRuntime(
       motionPedometerAvailable = { motionHandler.isPedometerAvailable() },
     )
 
+  /**
+   * Pending TLS trust decision when a gateway certificate is new or has changed.
+   */
   data class GatewayTrustPrompt(
     val endpoint: GatewayEndpoint,
     val fingerprintSha256: String,
@@ -282,6 +291,9 @@ class NodeRuntime(
   val pendingGatewayTrust: StateFlow<GatewayTrustPrompt?> = _pendingGatewayTrust.asStateFlow()
   private val connectAttemptSeq = AtomicLong(0)
 
+  /**
+   * Builds the node-owned session key from stable device identity plus optional active agent.
+   */
   private fun resolveNodeMainSessionKey(agentId: String? = null): String {
     val deviceId = identityStore.loadOrCreate().deviceId
     return buildNodeMainSessionKey(deviceId, agentId)
