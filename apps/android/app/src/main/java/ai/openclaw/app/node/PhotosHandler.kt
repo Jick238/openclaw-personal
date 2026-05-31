@@ -56,6 +56,7 @@ internal interface PhotosDataSource {
 }
 
 private object SystemPhotosDataSource : PhotosDataSource {
+  /** Checks the API-specific image read permission used by MediaStore image access. */
   override fun hasPermission(context: Context): Boolean {
     val permission =
       if (Build.VERSION.SDK_INT >= 33) {
@@ -318,6 +319,7 @@ class PhotosHandler private constructor(
   }
 
   companion object {
+    /** Creates a handler with an injected photo source for parser and payload tests. */
     internal fun forTesting(
       appContext: Context,
       dataSource: PhotosDataSource,

@@ -35,6 +35,7 @@ internal interface SystemNotificationPoster {
 private class AndroidSystemNotificationPoster(
   private val appContext: Context,
 ) : SystemNotificationPoster {
+  /** Checks both Android 13 runtime permission and app-level notification enablement. */
   override fun isAuthorized(): Boolean {
     if (Build.VERSION.SDK_INT >= 33) {
       val granted =
@@ -45,6 +46,7 @@ private class AndroidSystemNotificationPoster(
     return NotificationManagerCompat.from(appContext).areNotificationsEnabled()
   }
 
+  /** Posts through a priority-specific channel so Android's immutable channel importance is respected. */
   override fun post(request: SystemNotifyRequest) {
     val channelId = ensureChannel(request.priority)
     val silent = isSilentSound(request.sound)
@@ -175,6 +177,7 @@ class SystemHandler private constructor(
   }
 
   companion object {
+    /** Creates a handler with a fake poster for parser and authorization tests. */
     internal fun forTesting(poster: SystemNotificationPoster): SystemHandler = SystemHandler(poster)
   }
 }

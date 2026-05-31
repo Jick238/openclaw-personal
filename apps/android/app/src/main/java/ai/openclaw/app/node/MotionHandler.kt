@@ -363,8 +363,10 @@ class MotionHandler private constructor(
 
   fun isAvailable(): Boolean = dataSource.isAvailable(appContext)
 
+  /** Returns true when live accelerometer classification can be sampled. */
   fun isActivityAvailable(): Boolean = dataSource.isActivityAvailable(appContext)
 
+  /** Returns true when Android exposes a cumulative step-counter sensor. */
   fun isPedometerAvailable(): Boolean = dataSource.isPedometerAvailable(appContext)
 
   private fun parseActivityRequest(paramsJson: String?): MotionActivityRequest? {
@@ -404,8 +406,10 @@ class MotionHandler private constructor(
   }
 
   companion object {
+    /** Static capability probe used before a MotionHandler instance is needed. */
     fun isMotionCapabilityAvailable(context: Context): Boolean = SystemMotionDataSource.isAvailable(context)
 
+    /** Creates a handler with an injected sensor source for parser and payload tests. */
     internal fun forTesting(
       appContext: Context,
       dataSource: MotionDataSource,
