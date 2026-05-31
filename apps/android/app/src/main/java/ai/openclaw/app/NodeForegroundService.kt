@@ -181,6 +181,7 @@ class NodeForegroundService : Service() {
   private fun startForegroundWithTypes(notification: Notification) {
     val serviceTypes = foregroundServiceTypesForVoiceMode(voiceCaptureMode)
     if (didStartForeground) {
+      // Re-issue startForeground when Talk mode toggles so Android sees the microphone service type.
       ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, serviceTypes)
       return
     }
@@ -215,6 +216,7 @@ class NodeForegroundService : Service() {
           .setAction(ACTION_SET_VOICE_CAPTURE_MODE)
           .putExtra(EXTRA_VOICE_CAPTURE_MODE, mode.name)
       if (mode == VoiceCaptureMode.TalkMode) {
+        // Microphone foreground service type must be declared before Talk capture starts.
         ContextCompat.startForegroundService(context, intent)
       } else {
         context.startService(intent)
@@ -223,6 +225,9 @@ class NodeForegroundService : Service() {
   }
 }
 
+/**
+ * Foreground-service type mask required by Android for the current voice capture mode.
+ */
 internal fun foregroundServiceTypesForVoiceMode(mode: VoiceCaptureMode): Int {
   val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
   return if (mode == VoiceCaptureMode.TalkMode) {
@@ -232,6 +237,9 @@ internal fun foregroundServiceTypesForVoiceMode(mode: VoiceCaptureMode): Int {
   }
 }
 
+/**
+ * Compact notification suffix for voice state; kept pure for service-notification tests.
+ */
 internal fun voiceNotificationSuffix(
   mode: VoiceCaptureMode,
   manualMicEnabled: Boolean,

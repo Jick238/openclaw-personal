@@ -14,6 +14,9 @@ enum class HomeDestination {
   Settings,
 }
 
+/**
+ * Normalized launch request from Android Assistant or explicit app actions.
+ */
 data class AssistantLaunchRequest(
   val source: String,
   val prompt: String?,
@@ -23,11 +26,15 @@ data class AssistantLaunchRequest(
 fun parseHomeDestinationIntent(intent: Intent?): HomeDestination? {
   val action = intent?.action ?: return null
   return when {
+    // Debug-only shortcut keeps E2E navigation out of release builds.
     BuildConfig.DEBUG && action == actionOpenVoiceE2e -> HomeDestination.Voice
     else -> null
   }
 }
 
+/**
+ * Parse external assistant entry points without starting any UI side effects.
+ */
 fun parseAssistantLaunchIntent(intent: Intent?): AssistantLaunchRequest? {
   val action = intent?.action ?: return null
   return when (action) {

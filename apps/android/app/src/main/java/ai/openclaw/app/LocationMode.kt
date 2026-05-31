@@ -1,5 +1,8 @@
 package ai.openclaw.app
 
+/**
+ * Persisted location capture mode advertised to the gateway.
+ */
 enum class LocationMode(
   val rawValue: String,
 ) {
@@ -10,6 +13,7 @@ enum class LocationMode(
   companion object {
     fun fromRawValue(raw: String?): LocationMode {
       val normalized = raw?.trim()?.lowercase()
+      // Older configs used "always"; Android node currently exposes while-using location only.
       if (normalized == "always") return WhileUsing
       return entries.firstOrNull { it.rawValue.lowercase() == normalized } ?: Off
     }
