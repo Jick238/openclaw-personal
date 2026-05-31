@@ -49,6 +49,9 @@ import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/**
+ * Watches local DNS-SD and optional wide-area DNS-SD for reachable OpenClaw gateways.
+ */
 class GatewayDiscovery(
   context: Context,
   private val scope: CoroutineScope,
@@ -168,6 +171,7 @@ class GatewayDiscovery(
 
   private fun resolve(serviceInfo: NsdServiceInfo) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      // Android 14+ streams service updates; older releases require one-shot resolve calls.
       resolveWithServiceInfoCallback(serviceInfo)
     } else {
       resolveLegacy(serviceInfo)
@@ -255,6 +259,7 @@ class GatewayDiscovery(
     val tlsEnabled = txtBool(resolved, "gatewayTls")
     val tlsFingerprint = txt(resolved, "gatewayTlsSha256")
     val id = stableId(serviceName, "local.")
+    // Local NSD gives the socket host/port; TXT ports are retained as gateway metadata only.
     localById[id] =
       GatewayEndpoint(
         stableId = id,
@@ -288,6 +293,7 @@ class GatewayDiscovery(
 
   private fun publish() {
     _gateways.value =
+      // Merge local and wide-area results deterministically for stable UI selection.
       (localById.values + unicastById.values).sortedBy { it.name.lowercase() }
     _statusText.value = buildStatusText()
   }
@@ -369,6 +375,7 @@ class GatewayDiscovery(
           ?: resolveHostUnicast(targetFqdn)
           ?: continue
 
+      // Wide-area DNS-SD may put TXT in additional records; fall back to a direct TXT query.
       val txtFromPtr =
         recordsByName(ptrMsg, Section.ADDITIONAL)[keyName(instanceFqdn)]
           .orEmpty()
@@ -454,6 +461,7 @@ class GatewayDiscovery(
     val system = queryViaSystemDns(query)
     if (records(system, Section.ANSWER).any { it.type == type }) return system
 
+    // Android's DnsResolver can miss split-DNS answers; retry with dnsjava against network DNS servers.
     val direct = createDirectResolver() ?: return system
     return try {
       val msg = direct.send(query)
@@ -548,6 +556,7 @@ class GatewayDiscovery(
 
     val candidateNetworks =
       buildList {
+        // Put VPN DNS first so Tailscale split-horizon names win over public DNS.
         trackedNetworks(cm)
           .firstOrNull { n ->
             val caps = cm.getNetworkCapabilities(n) ?: return@firstOrNull false

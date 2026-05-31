@@ -12,6 +12,9 @@ import ai.openclaw.app.gateway.isLocalCleartextGatewayHost
 import ai.openclaw.app.gateway.isLoopbackGatewayHost
 import android.os.Build
 
+/**
+ * Builds gateway connect metadata from current Android permissions, settings, and device identity.
+ */
 class ConnectionManager(
   private val prefs: SecurePrefs,
   private val cameraEnabled: () -> Boolean,
@@ -28,6 +31,9 @@ class ConnectionManager(
   private val manualTls: () -> Boolean,
 ) {
   companion object {
+    /**
+     * Decide whether a discovered/manual endpoint must use pinned TLS or can stay local cleartext.
+     */
     internal fun resolveTlsParamsForEndpoint(
       endpoint: GatewayEndpoint,
       storedFingerprint: String?,
@@ -44,6 +50,7 @@ class ConnectionManager(
         }
 
       if (isManual) {
+        // Manual remote hosts default to TLS; only local manual hosts may honor the cleartext toggle.
         if (!manualTlsEnabled && cleartextAllowedHost) return null
         if (!stored.isNullOrBlank()) {
           return GatewayTlsParams(
@@ -83,6 +90,7 @@ class ConnectionManager(
       }
 
       if (!cleartextAllowedHost) {
+        // Non-loopback discovered hosts require TLS even without TXT hints.
         return GatewayTlsParams(
           required = true,
           expectedFingerprint = null,
@@ -114,6 +122,9 @@ class ConnectionManager(
 
   fun buildCapabilities(): List<String> = InvokeCommandRegistry.advertisedCapabilities(runtimeFlags())
 
+  /**
+   * Debug Android builds advertise a dev version so gateway logs do not look like release clients.
+   */
   fun resolvedVersionName(): String {
     val versionName = BuildConfig.VERSION_NAME.trim().ifEmpty { "dev" }
     return if (BuildConfig.DEBUG && !versionName.contains("dev", ignoreCase = true)) {
@@ -129,6 +140,9 @@ class ConnectionManager(
       .trim()
       .ifEmpty { null }
 
+  /**
+   * User-Agent used for gateway telemetry and troubleshooting.
+   */
   fun buildUserAgent(): String {
     val version = resolvedVersionName()
     val release =
