@@ -578,9 +578,12 @@ private fun isSafeMarkdownLinkDestination(destination: String): Boolean {
     runCatching { URI(destination).scheme?.lowercase(Locale.US) }
       .getOrNull()
       ?: return false
+  // Chat markdown links are user/model supplied; keep navigation limited to
+  // browser-safe web URLs instead of custom Android intents or file URLs.
   return scheme == "http" || scheme == "https"
 }
 
+/** Builds styled inline markdown for compact chat labels and preview text. */
 internal fun buildChatInlineMarkdown(
   text: String,
   linkColor: Color = Color.Blue,
