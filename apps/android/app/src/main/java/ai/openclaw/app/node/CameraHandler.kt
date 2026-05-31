@@ -32,6 +32,7 @@ class CameraHandler(
   private val triggerCameraFlash: () -> Unit,
   private val invokeErrorFromThrowable: (err: Throwable) -> Pair<String, String>,
 ) {
+  /** Handles camera.list by exposing CameraX devices through gateway metadata. */
   suspend fun handleList(_paramsJson: String?): GatewaySession.InvokeResult =
     try {
       val devices = camera.listDevices()
@@ -59,6 +60,7 @@ class CameraHandler(
       GatewaySession.InvokeResult.error(code = code, message = message)
     }
 
+  /** Handles camera.snap with HUD progress, flash feedback, and normalized invoke errors. */
   suspend fun handleSnap(paramsJson: String?): GatewaySession.InvokeResult {
     val logFile = if (BuildConfig.DEBUG) java.io.File(appContext.cacheDir, "camera_debug.log") else null
 
@@ -98,6 +100,7 @@ class CameraHandler(
     }
   }
 
+  /** Handles camera.clip and keeps external audio capture paused while camera audio is active. */
   suspend fun handleClip(paramsJson: String?): GatewaySession.InvokeResult {
     val clipLogFile = if (BuildConfig.DEBUG) java.io.File(appContext.cacheDir, "camera_debug.log") else null
 
