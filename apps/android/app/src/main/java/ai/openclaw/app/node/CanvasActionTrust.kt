@@ -2,6 +2,9 @@ package ai.openclaw.app.node
 
 import java.net.URI
 
+/**
+ * Trust helper for WebView-originated canvas/A2UI actions.
+ */
 object CanvasActionTrust {
   /** Local canvas scaffold is the only trusted file URL. */
   const val scaffoldAssetUrl: String = "file:///android_asset/CanvasScaffold/scaffold.html"
