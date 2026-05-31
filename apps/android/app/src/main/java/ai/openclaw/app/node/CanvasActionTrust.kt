@@ -3,8 +3,10 @@ package ai.openclaw.app.node
 import java.net.URI
 
 object CanvasActionTrust {
+  /** Local canvas scaffold is the only trusted file URL. */
   const val scaffoldAssetUrl: String = "file:///android_asset/CanvasScaffold/scaffold.html"
 
+  /** Accepts local scaffold or exact remote A2UI URLs advertised by the gateway. */
   fun isTrustedCanvasActionUrl(
     rawUrl: String?,
     trustedA2uiUrls: List<String>,
@@ -33,6 +35,7 @@ object CanvasActionTrust {
     return candidateUri == normalizedTrusted
   }
 
+  /** Normalizes only the URL parts allowed to vary across trusted remote A2UI URLs. */
   private fun normalizeTrustedRemoteA2uiUri(uri: URI): URI? {
     // Keep Android trust normalization aligned with iOS ScreenController:
     // exact remote URL match, scheme/host normalized, fragment ignored.
