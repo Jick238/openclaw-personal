@@ -7,6 +7,7 @@ import {
 } from "./device-auth.js";
 export type { DeviceAuthEntry, DeviceAuthStore } from "./device-auth.js";
 
+/** Storage seam used by shared device-auth helpers and filesystem-backed infra wrappers. */
 export type DeviceAuthStoreAdapter = {
   readStore: () => DeviceAuthStore | null;
   writeStore: (store: DeviceAuthStore) => void;
@@ -45,6 +46,7 @@ function copyCanonicalDeviceAuthTokens(
   return out;
 }
 
+/** Load one normalized role token, ignoring stores bound to a different gateway device id. */
 export function loadDeviceAuthTokenFromStore(params: {
   adapter: DeviceAuthStoreAdapter;
   deviceId: string;
@@ -58,6 +60,7 @@ export function loadDeviceAuthTokenFromStore(params: {
   return coerceDeviceAuthEntry(role, store.tokens[role]);
 }
 
+/** Store one role token while preserving canonical tokens for the same gateway device id. */
 export function storeDeviceAuthTokenInStore(params: {
   adapter: DeviceAuthStoreAdapter;
   deviceId: string;
@@ -86,6 +89,7 @@ export function storeDeviceAuthTokenInStore(params: {
   return entry;
 }
 
+/** Clear one normalized role token without rewriting missing or wrong-device stores. */
 export function clearDeviceAuthTokenFromStore(params: {
   adapter: DeviceAuthStoreAdapter;
   deviceId: string;
