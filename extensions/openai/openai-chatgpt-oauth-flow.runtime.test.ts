@@ -120,6 +120,7 @@ function mockFakeIpTokenResponse(params: { address: string; family: 4 | 6 }): vo
 afterEach(() => {
   ssrfMocks.fetchWithSsrFGuard.mockReset();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("OpenAI Codex OAuth flow", () => {
@@ -395,6 +396,41 @@ describe("OpenAI Codex OAuth flow", () => {
       type: "failed",
       message: "OpenAI Codex token refresh timed out after 5ms",
     });
+  });
+
+  it("routes token refresh through the trusted environment proxy when configured", async () => {
+    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:7897");
+    mockTokenResponse({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_in: 3600,
+    });
+
+    await refreshOpenAIAccessToken("old-refresh-token", { timeoutMs: 5 });
+
+    expect(ssrfMocks.fetchWithSsrFGuard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "trusted_env_proxy",
+        url: "https://auth.openai.com/oauth/token",
+      }),
+    );
+  });
+
+  it("keeps strict token routing when no HTTP proxy is configured", async () => {
+    for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] as const) {
+      vi.stubEnv(key, "");
+    }
+    mockTokenResponse({
+      access_token: "access-token",
+      refresh_token: "refresh-token",
+      expires_in: 3600,
+    });
+
+    await refreshOpenAIAccessToken("old-refresh-token", { timeoutMs: 5 });
+
+    expect(ssrfMocks.fetchWithSsrFGuard).toHaveBeenCalledWith(
+      expect.not.objectContaining({ mode: "trusted_env_proxy" }),
+    );
   });
 
   it("rejects non-positive token refresh lifetimes", async () => {
