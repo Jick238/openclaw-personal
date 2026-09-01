@@ -22,7 +22,6 @@ import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import { readConfigFileSnapshot } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { getChannelActivity } from "../../infra/channel-activity.js";
 import { DEFAULT_ACCOUNT_ID } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runTasksWithConcurrency } from "../../utils/run-with-concurrency.js";
@@ -464,16 +463,6 @@ export const channelsHandlers: GatewayRequestHandlers = {
       }
       if (lastProbeAt) {
         snapshot.lastProbeAt = lastProbeAt;
-      }
-      const activity = getChannelActivity({
-        channel: channelId as never,
-        accountId,
-      });
-      if (snapshot.lastInboundAt == null) {
-        snapshot.lastInboundAt = activity.inboundAt;
-      }
-      if (snapshot.lastOutboundAt == null) {
-        snapshot.lastOutboundAt = activity.outboundAt;
       }
       const healthState = resolveChannelHealthState(snapshot, {
         channelId,

@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAccountSnapshot, ChannelPlugin } from "../channels/plugins/types.public.js";
 import type { HealthSummary } from "../gateway/health/types.js";
+import { recordChannelActivity } from "../infra/channel-activity.js";
 import { createPluginRecord } from "../plugins/status.test-fixtures.js";
 import {
   createLegacyHealthSnapshotCollector,
@@ -632,8 +633,10 @@ describe("collectGatewayHealthSnapshot", () => {
     }
   });
 
-  it("preserves runtime state and probe payloads when plugin summaries omit them", async () => {
-    testConfig = { channels: { telegram: { botToken: "t-1" } } };
+  it("preserves runtime state, activity, and probe payloads when plugin summaries omit them", async () => {
+    testConfig = {
+      channels: { telegram: { accounts: { activity: { botToken: "t-1" } } } },
+    };
     testStore = {};
     vi.stubEnv("DISCORD_BOT_TOKEN", "");
     buildTelegramHealthSummaryForTest = (snapshot) => ({
@@ -644,26 +647,35 @@ describe("collectGatewayHealthSnapshot", () => {
       ok: true,
       bot: { username: "runtime_bot" },
     });
+    recordChannelActivity({
+      channel: "telegram",
+      accountId: "activity",
+      direction: "outbound",
+      at: 456,
+    });
 
     const snap = await getHealthSnapshot({
       timeoutMs: 25,
       runtimeSnapshot: {
-        channels: {
+        channels: {},
+        channelAccounts: {
           telegram: {
-            accountId: "default",
-            running: true,
-            connected: true,
-            lastConnectedAt: 123,
-            healthState: "reconnecting",
+            activity: {
+              accountId: "activity",
+              running: true,
+              connected: true,
+              lastConnectedAt: 123,
+              healthState: "reconnecting",
+            },
           },
         },
-        channelAccounts: {},
       },
     });
     type RuntimeStateFields = {
       running?: boolean;
       connected?: boolean;
       lastConnectedAt?: number;
+      lastOutboundAt?: number | null;
       healthState?: string;
       probe?: { ok?: boolean; bot?: { username?: string } };
     };
@@ -674,12 +686,14 @@ describe("collectGatewayHealthSnapshot", () => {
     expect(telegram.running).toBe(true);
     expect(telegram.connected).toBe(true);
     expect(telegram.lastConnectedAt).toBe(123);
+    expect(telegram.lastOutboundAt).toBe(456);
     expect(telegram.healthState).toBe("reconnecting");
     expect(telegram.probe?.bot?.username).toBe("runtime_bot");
-    expect(telegram.accounts?.default?.running).toBe(true);
-    expect(telegram.accounts?.default?.connected).toBe(true);
-    expect(telegram.accounts?.default?.healthState).toBe("reconnecting");
-    expect(telegram.accounts?.default?.probe?.ok).toBe(true);
+    expect(telegram.accounts?.activity?.running).toBe(true);
+    expect(telegram.accounts?.activity?.connected).toBe(true);
+    expect(telegram.accounts?.activity?.lastOutboundAt).toBe(456);
+    expect(telegram.accounts?.activity?.healthState).toBe("reconnecting");
+    expect(telegram.accounts?.activity?.probe?.ok).toBe(true);
   });
 
   it("merges inspected account metadata with runtime state before building health summaries", async () => {

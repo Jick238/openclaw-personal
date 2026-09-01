@@ -5,6 +5,7 @@
  */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { getChannelActivity } from "../../infra/channel-activity.js";
 import { inspectChannelAccount } from "../account-inspection.js";
 import {
   projectSafeChannelAccountSnapshotFields,
@@ -70,6 +71,16 @@ export async function buildChannelAccountSnapshotFromAccount<ResolvedAccount>(pa
   });
   const projectedSnapshot = { ...snapshot };
   applyChannelAccountState(projectedSnapshot, state);
+  const activity = getChannelActivity({
+    channel: params.plugin.id,
+    accountId: params.accountId,
+  });
+  if (projectedSnapshot.lastInboundAt == null) {
+    projectedSnapshot.lastInboundAt = activity.inboundAt;
+  }
+  if (projectedSnapshot.lastOutboundAt == null) {
+    projectedSnapshot.lastOutboundAt = activity.outboundAt;
+  }
   return redactChannelAccountSnapshotBaseUrl({
     ...projectedSnapshot,
     enabled,

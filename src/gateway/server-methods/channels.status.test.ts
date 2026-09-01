@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
   listChannelPlugins: vi.fn(),
   buildChannelUiCatalog: vi.fn(),
   resolveChannelAccountSnapshot: vi.fn(),
-  getChannelActivity: vi.fn(),
 }));
 
 vi.mock("../../config/config.js", () => ({
@@ -56,10 +55,6 @@ vi.mock("../../channels/plugins/catalog.js", () => ({
 
 vi.mock("../../channels/plugins/status.js", () => ({
   resolveChannelAccountSnapshot: mocks.resolveChannelAccountSnapshot,
-}));
-
-vi.mock("../../infra/channel-activity.js", () => ({
-  getChannelActivity: mocks.getChannelActivity,
 }));
 
 import { channelsHandlers } from "./channels.js";
@@ -185,10 +180,6 @@ describe("channelsHandlers channels.status", () => {
     mocks.resolveChannelAccountSnapshot.mockResolvedValue({
       accountId: "default",
       configured: true,
-    });
-    mocks.getChannelActivity.mockReturnValue({
-      inboundAt: null,
-      outboundAt: null,
     });
     mocks.listChannelPlugins.mockReturnValue([createChannelPlugin()]);
   });
@@ -325,8 +316,6 @@ describe("channelsHandlers channels.status", () => {
           accountId: "default",
           configured: true,
           lastProbeAt: expect.any(Number),
-          lastInboundAt: null,
-          lastOutboundAt: null,
           healthState: "not-running",
         },
       ],
