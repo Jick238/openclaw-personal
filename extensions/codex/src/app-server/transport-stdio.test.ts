@@ -54,6 +54,24 @@ describe("createStdioTransport", () => {
     );
   });
 
+  it("enables Codex system proxy handling for an active managed route", async () => {
+    await createStdioTransport(startOptions("codex"), {
+      OPENCLAW_PROXY_ACTIVE: "1",
+      HTTPS_PROXY: "http://proxy.example:8080",
+    });
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      "codex",
+      ["-c", "features.respect_system_proxy=true", "app-server", "--listen", "stdio://"],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          OPENCLAW_PROXY_ACTIVE: "1",
+          HTTPS_PROXY: "http://proxy.example:8080",
+        }),
+      }),
+    );
+  });
+
   it("preserves wrapper prefixes, root option values, and raw override ordering", async () => {
     const overrides = ["-c", 'developer_instructions="app-server = literal"'];
     const args = [
@@ -202,5 +220,51 @@ describe("resolveCodexAppServerSpawnEnv", () => {
     expect(Object.hasOwn(env, "__proto__")).toBe(false);
     expect(Object.hasOwn(env, "constructor")).toBe(false);
     expect(Object.hasOwn(env, "prototype")).toBe(false);
+  });
+
+  it("fails closed when managed proxy activation has no inherited route", () => {
+    expect(() => resolveCodexAppServerSpawnEnv({}, { OPENCLAW_PROXY_ACTIVE: "1" })).toThrow(
+      "requires the active managed proxy",
+    );
+  });
+
+  it("does not treat the OpenClaw config marker as a Codex proxy route", () => {
+    expect(() =>
+      resolveCodexAppServerSpawnEnv(
+        {},
+        { OPENCLAW_PROXY_ACTIVE: "1", OPENCLAW_PROXY_URL: "http://proxy.example:8080" },
+      ),
+    ).toThrow("requires the active managed proxy");
+  });
+
+  it("preserves the inherited managed proxy route for the app-server child", () => {
+    const env = resolveCodexAppServerSpawnEnv(
+      {},
+      {
+        OPENCLAW_PROXY_ACTIVE: "1",
+        HTTPS_PROXY: "http://proxy.example:8080",
+        NO_PROXY: "",
+      },
+    );
+    expect(env).toMatchObject({
+      OPENCLAW_PROXY_ACTIVE: "1",
+      HTTPS_PROXY: "http://proxy.example:8080",
+      NO_PROXY: "",
+    });
+  });
+
+  it("does not allow child env overrides to clear the managed proxy contract", () => {
+    expect(() =>
+      resolveCodexAppServerSpawnEnv(
+        {
+          env: { OPENCLAW_PROXY_ACTIVE: "", HTTPS_PROXY: "" },
+          clearEnv: ["OPENCLAW_PROXY_ACTIVE", "HTTPS_PROXY"],
+        },
+        {
+          OPENCLAW_PROXY_ACTIVE: "1",
+          HTTPS_PROXY: "http://proxy.example:8080",
+        },
+      ),
+    ).toThrow("no proxy route was inherited");
   });
 });

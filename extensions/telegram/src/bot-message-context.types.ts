@@ -34,7 +34,12 @@ export type TelegramChannelIngressResolver = (
   contextBinding: ChannelIngressContextBinding,
 ) => Promise<ResolvedChannelMessageIngress>;
 
+export type TelegramAlternateFinalResponseTarget = {
+  deliver: (text: string) => Promise<boolean>;
+};
+
 export type TelegramMessageContextOptions = {
+  responseTarget?: TelegramAlternateFinalResponseTarget;
   threadSpec?: TelegramThreadSpec;
   commandSource?: "text" | "native";
   forceWasMentioned?: boolean;

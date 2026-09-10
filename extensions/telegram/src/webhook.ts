@@ -3,7 +3,10 @@ import { createServer } from "node:http";
 import type { IncomingMessage } from "node:http";
 import net from "node:net";
 import { InputFile } from "grammy";
-import type { ChannelAccountSnapshot } from "openclaw/plugin-sdk/channel-contract";
+import type {
+  ChannelAccountSnapshot,
+  ChannelRuntimeSurface,
+} from "openclaw/plugin-sdk/channel-contract";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { isDiagnosticsEnabled } from "openclaw/plugin-sdk/diagnostic-runtime";
 import {
@@ -305,6 +308,7 @@ export async function startTelegramWebhook(opts: {
   runtime?: RuntimeEnv;
   buildContext?: Parameters<typeof createTelegramBot>[0]["buildContext"];
   dispatchReplyFromConfig?: Parameters<typeof createTelegramBot>[0]["dispatchReplyFromConfig"];
+  externalTurns?: ChannelRuntimeSurface["externalTurns"];
   fetch?: typeof fetch;
   abortSignal?: AbortSignal;
   healthPath?: string;
@@ -345,6 +349,7 @@ export async function startTelegramWebhook(opts: {
     : undefined;
   const telegramTransport = resolveTelegramTransport(opts.fetch, {
     network: telegramAccountConfig?.network,
+    requireProxy: opts.config?.proxy?.enabled === true,
   });
   let closeTransportPromise: Promise<void> | undefined;
   const closeTransportOnce = (): Promise<void> => {
@@ -363,6 +368,7 @@ export async function startTelegramWebhook(opts: {
     runtime,
     buildContext: opts.buildContext,
     dispatchReplyFromConfig: opts.dispatchReplyFromConfig,
+    externalTurns: opts.externalTurns,
     proxyFetch: opts.fetch,
     fetchAbortSignal: botFetchAbortSignal,
     accountAbortSignal,

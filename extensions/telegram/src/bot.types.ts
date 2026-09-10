@@ -1,3 +1,4 @@
+import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract";
 // Telegram type declarations define plugin contracts.
 import type { ChannelInboundTurnPlan } from "openclaw/plugin-sdk/channel-inbound";
 import type { OpenClawConfig, ReplyToMode } from "openclaw/plugin-sdk/config-contracts";
@@ -17,6 +18,7 @@ export type TelegramBotOptions = {
   buildContext?: typeof import("openclaw/plugin-sdk/channel-inbound").buildChannelInboundEventContext;
   /** Instance-bound reply dispatcher prepared by the owning plugin runtime. */
   dispatchReplyFromConfig?: DispatchReplyFromConfig;
+  externalTurns?: ChannelRuntimeSurface["externalTurns"];
   requireMention?: boolean;
   allowFrom?: Array<string | number>;
   groupAllowFrom?: Array<string | number>;

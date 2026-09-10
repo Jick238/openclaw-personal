@@ -563,6 +563,13 @@ export async function finalizePendingAnswerBlockDraft(turn: Turn): Promise<void>
 }
 
 export async function deliverFallback(turn: Turn, replies: ReplyPayload[], silent: boolean) {
+  if (turn.responseTarget) {
+    const text = replies.map((reply) => reply.text ?? "").join("\n").trim();
+    if (!text) {
+      return { delivered: false };
+    }
+    return { delivered: await turn.responseTarget.deliver(text) };
+  }
   return await (turn.telegramDeps.deliverReplies ?? deliverReplies)({
     replies,
     ...createDeliveryBaseOptions(turn),

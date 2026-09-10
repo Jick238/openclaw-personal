@@ -432,6 +432,7 @@ async function maybeRepairTelegramAllowFromUsernames(cfg: OpenClawConfig): Promi
           token,
           chatId: username,
           network: account.config.network,
+          requireProxy: resolvedConfig.proxy?.enabled === true,
           signal: undefined,
         });
         if (id) {

@@ -60,8 +60,10 @@ export function createEmbeddedAttemptDeferredLifecycleOwner(params: {
       }
       state = "completed";
       try {
-        if (params.trajectoryRecorder && sessionEndData) {
-          params.trajectoryRecorder.recordEvent("session.ended", sessionEndData);
+        if (params.trajectoryRecorder) {
+          if (sessionEndData) {
+            params.trajectoryRecorder.recordEvent("session.ended", sessionEndData);
+          }
           await flushEmbeddedAttemptTrajectoryRecorder({
             runId: params.runId,
             sessionId: params.sessionId,

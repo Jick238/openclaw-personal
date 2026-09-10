@@ -86,6 +86,9 @@ type TelegramDispatcher =
 
 type TelegramDispatcherMode = "direct" | "env-proxy" | "explicit-proxy";
 
+const TELEGRAM_PROXY_REQUIRED_ERROR =
+  "Telegram proxy is required for this runtime, but no usable proxy route is configured";
+
 type TelegramDispatcherAttempt = {
   dispatcherPolicy?: PinnedDispatcherPolicy;
 };
@@ -279,7 +282,10 @@ function withPinnedLookup(
   return options ? { ...options, lookup } : { lookup };
 }
 
-function createTelegramDispatcher(policy: PinnedDispatcherPolicy): {
+function createTelegramDispatcher(
+  policy: PinnedDispatcherPolicy,
+  requireProxy: boolean,
+): {
   dispatcher: TelegramDispatcher;
   mode: TelegramDispatcherMode;
   effectivePolicy: PinnedDispatcherPolicy;
@@ -324,6 +330,14 @@ function createTelegramDispatcher(policy: PinnedDispatcherPolicy): {
         effectivePolicy: policy,
       };
     } catch (err) {
+      if (requireProxy) {
+        throw new Error(
+          `required Telegram proxy dispatcher init failed: ${formatErrorMessage(err)}`,
+          {
+            cause: err,
+          },
+        );
+      }
       log.warn(
         `env proxy dispatcher init failed; falling back to direct dispatcher: ${formatErrorMessage(err)}`,
       );
@@ -470,6 +484,7 @@ function createTelegramTransportAttempts(params: {
   defaultDispatcher: ReturnType<typeof createTelegramDispatcher>;
   allowFallback: boolean;
   fallbackPolicy?: PinnedDispatcherPolicy;
+  requireProxy: boolean;
   ownedDispatchers: Set<TelegramDispatcher>;
 }): TelegramTransportAttempt[] {
   params.ownedDispatchers.add(params.defaultDispatcher.dispatcher);
@@ -491,7 +506,7 @@ function createTelegramTransportAttempts(params: {
   attempts.push({
     createDispatcher: () => {
       if (!ipv4Dispatcher) {
-        ipv4Dispatcher = createTelegramDispatcher(fallbackPolicy).dispatcher;
+        ipv4Dispatcher = createTelegramDispatcher(fallbackPolicy, params.requireProxy).dispatcher;
         ownedDispatchers.add(ipv4Dispatcher);
       }
       return ipv4Dispatcher;
@@ -516,7 +531,10 @@ function createTelegramTransportAttempts(params: {
   attempts.push({
     createDispatcher: () => {
       if (!fallbackIpDispatcher) {
-        fallbackIpDispatcher = createTelegramDispatcher(fallbackIpPolicy).dispatcher;
+        fallbackIpDispatcher = createTelegramDispatcher(
+          fallbackIpPolicy,
+          params.requireProxy,
+        ).dispatcher;
         ownedDispatchers.add(fallbackIpDispatcher);
       }
       return fallbackIpDispatcher;
@@ -549,8 +567,13 @@ async function destroyOwnedDispatchers(dispatchers: Iterable<TelegramDispatcher>
 
 export function resolveTelegramTransport(
   proxyFetch?: typeof fetch,
-  options?: { network?: TelegramNetworkConfig },
+  options?: { network?: TelegramNetworkConfig; requireProxy?: boolean },
 ): TelegramTransport {
+  // The managed lifecycle marker is Hicks' process-wide route contract. Keep the
+  // explicit option for callers that require proxying before lifecycle startup;
+  // an unmarked generic OpenClaw process retains its existing direct behavior.
+  const requireProxy =
+    options?.requireProxy === true || process.env["OPENCLAW_PROXY_ACTIVE"] === "1";
   const autoSelectDecision = resolveTelegramAutoSelectFamilyDecision({
     network: options?.network,
   });
@@ -562,16 +585,21 @@ export function resolveTelegramTransport(
     dnsDecision,
   });
 
-  const effectiveProxyFetch =
+  const candidateProxyFetch =
     proxyFetch ??
     (() => {
       const debugProxyUrl = resolveEffectiveDebugProxyUrl(undefined);
       return debugProxyUrl ? makeProxyFetch(debugProxyUrl) : undefined;
     })();
-  const explicitProxyUrl = effectiveProxyFetch
-    ? getProxyUrlFromFetch(effectiveProxyFetch)
+  const explicitProxyUrl = candidateProxyFetch
+    ? getProxyUrlFromFetch(candidateProxyFetch)
     : undefined;
+  // A required route may only use a fetch whose proxy ownership is observable.
+  // Opaque callers can otherwise smuggle a direct fetch into the required path.
+  const effectiveProxyFetch = requireProxy && !explicitProxyUrl ? undefined : candidateProxyFetch;
   const hasEnvProxy = !explicitProxyUrl && hasEnvHttpProxyForTelegramApi();
+  const envProxyBypassesTelegram =
+    hasEnvProxy && matchesNoProxy(`https://${TELEGRAM_API_HOSTNAME}`);
   const managedProxyUrl =
     !effectiveProxyFetch && !hasEnvProxy ? resolveOpenClawProxyUrlForTelegram() : undefined;
   const resolvedExplicitProxyUrl = explicitProxyUrl ?? managedProxyUrl;
@@ -582,12 +610,13 @@ export function resolveTelegramTransport(
       ? resolveWrappedFetch(effectiveProxyFetch)
       : undiciSourceFetch;
   const dnsResultOrder = normalizeDnsResultOrder(dnsDecision.value);
-  if (effectiveProxyFetch && !explicitProxyUrl) {
+  if (effectiveProxyFetch && !explicitProxyUrl && !requireProxy) {
     // The caller owns the underlying dispatcher lifecycle; nothing to close here.
     return { fetch: sourceFetch, sourceFetch, close: async () => {} };
   }
 
-  const useEnvProxy = !resolvedExplicitProxyUrl && hasEnvProxy;
+  const useEnvProxy =
+    !resolvedExplicitProxyUrl && hasEnvProxy && (!requireProxy || !envProxyBypassesTelegram);
   const defaultDispatcherResolution = resolveTelegramDispatcherPolicy({
     autoSelectFamily: autoSelectDecision.value,
     dnsResultOrder,
@@ -595,13 +624,26 @@ export function resolveTelegramTransport(
     forceIpv4: false,
     proxyUrl: resolvedExplicitProxyUrl,
   });
-  const defaultDispatcher = createTelegramDispatcher(defaultDispatcherResolution.policy);
+  const hasProxyRoute = Boolean(
+    effectiveProxyFetch || resolvedExplicitProxyUrl || (hasEnvProxy && !envProxyBypassesTelegram),
+  );
+  if (requireProxy && !hasProxyRoute) {
+    const unavailableFetch = (async () => {
+      throw new Error(TELEGRAM_PROXY_REQUIRED_ERROR);
+    }) as typeof fetch;
+    return { fetch: unavailableFetch, sourceFetch: unavailableFetch, close: async () => {} };
+  }
+  const defaultDispatcher = createTelegramDispatcher(
+    defaultDispatcherResolution.policy,
+    requireProxy,
+  );
   const shouldBypassEnvProxy = matchesNoProxy(`https://${TELEGRAM_API_HOSTNAME}`);
   const hasExplicitDnsResultOrder =
     (dnsDecision.source === "config" ||
       dnsDecision.source === `env:${TELEGRAM_DNS_RESULT_ORDER_ENV}`) &&
     dnsDecision.value !== "ipv4first";
   const allowStickyFallback =
+    !requireProxy &&
     !hasExplicitDnsResultOrder &&
     (defaultDispatcher.mode === "direct" ||
       (defaultDispatcher.mode === "env-proxy" && shouldBypassEnvProxy));
@@ -619,6 +661,7 @@ export function resolveTelegramTransport(
     defaultDispatcher,
     allowFallback: allowStickyFallback,
     fallbackPolicy: fallbackDispatcherPolicy,
+    requireProxy,
     ownedDispatchers,
   });
 
@@ -732,6 +775,11 @@ export function resolveTelegramTransport(
     const callerProvidedDispatcher = Boolean(
       (init as RequestInitWithDispatcher | undefined)?.dispatcher,
     );
+    if (requireProxy && callerProvidedDispatcher) {
+      throw new Error(
+        "Telegram proxy is required for this runtime; caller-provided direct dispatchers are not allowed",
+      );
+    }
     const stickyStartIndex = Math.min(stickyAttemptIndex, transportAttempts.length - 1);
     const stickyCooldownError = callerProvidedDispatcher
       ? null
@@ -849,7 +897,7 @@ export function resolveTelegramTransport(
 
 export function resolveTelegramFetch(
   proxyFetch?: typeof fetch,
-  options?: { network?: TelegramNetworkConfig },
+  options?: { network?: TelegramNetworkConfig; requireProxy?: boolean },
 ): typeof fetch {
   return resolveTelegramTransport(proxyFetch, options).fetch;
 }

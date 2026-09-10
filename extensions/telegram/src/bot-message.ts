@@ -249,7 +249,8 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
     }
     if (
       context.ctxPayload.InboundEventKind !== "room_event" &&
-      context.initialTypingCueSent !== true
+      context.initialTypingCueSent !== true &&
+      !(turnContext.responseTarget ?? options?.responseTarget)
     ) {
       void context.sendTyping().catch((err: unknown) => {
         logVerbose(`telegram early typing cue failed for chat ${context.chatId}: ${String(err)}`);
@@ -295,6 +296,7 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
           opts,
           retryDispatchErrors: spooledReplay,
           suppressFailureFallback: spooledReplay,
+          responseTarget: turnContext.responseTarget ?? options?.responseTarget,
           turnAdoptionLifecycle: params.turnAdoptionLifecycle,
         });
         if (dispatchResult?.kind === "failed-retryable") {

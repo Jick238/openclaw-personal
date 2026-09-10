@@ -169,7 +169,10 @@ afterEach(() => {
 
 function resolveTelegramFetchOrThrow(
   proxyFetch?: typeof fetch,
-  options?: { network?: { autoSelectFamily?: boolean; dnsResultOrder?: "ipv4first" | "verbatim" } },
+  options?: {
+    network?: { autoSelectFamily?: boolean; dnsResultOrder?: "ipv4first" | "verbatim" };
+    requireProxy?: boolean;
+  },
 ) {
   return resolveTelegramFetch(proxyFetch, options);
 }
@@ -392,6 +395,81 @@ afterEach(() => {
 });
 
 describe("resolveTelegramFetch", () => {
+  it("fails closed without a proxy when the runtime requires one", async () => {
+    const transport = resolveTelegramTransport(undefined, { requireProxy: true });
+
+    await expect(transport.fetch("https://api.telegram.org/botx/getMe")).rejects.toThrow(
+      "Telegram proxy is required",
+    );
+    expect(undiciFetch).not.toHaveBeenCalled();
+    expect(AgentCtor).not.toHaveBeenCalled();
+    expect(EnvHttpProxyAgentCtor).not.toHaveBeenCalled();
+  });
+
+  it("uses the recovered proxy after a required route is rebuilt", async () => {
+    const unavailable = resolveTelegramTransport(undefined, { requireProxy: true });
+    await expect(unavailable.fetch("https://api.telegram.org/botx/getMe")).rejects.toThrow(
+      "Telegram proxy is required",
+    );
+
+    vi.stubEnv("https_proxy", "http://127.0.0.1:7890");
+    undiciFetch.mockResolvedValue({ ok: true } as Response);
+    const recovered = resolveTelegramTransport(undefined, { requireProxy: true });
+    await expect(recovered.fetch("https://api.telegram.org/botx/getMe")).resolves.toEqual({
+      ok: true,
+    });
+    expect(EnvHttpProxyAgentCtor).toHaveBeenCalledTimes(1);
+    expect(AgentCtor).not.toHaveBeenCalled();
+  });
+
+  it("rejects an opaque fetch override when the runtime requires a proxy", async () => {
+    const directFetch = vi.fn(async () => ({ ok: true }) as Response) as unknown as typeof fetch;
+    const transport = resolveTelegramTransport(directFetch, { requireProxy: true });
+
+    await expect(transport.fetch("https://api.telegram.org/botx/getMe")).rejects.toThrow(
+      "Telegram proxy is required",
+    );
+    expect(directFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a NO_PROXY bypass when the runtime requires a proxy", async () => {
+    vi.stubEnv("https_proxy", "http://127.0.0.1:7890");
+    vi.stubEnv("no_proxy", "api.telegram.org");
+
+    const transport = resolveTelegramTransport(undefined, { requireProxy: true });
+
+    await expect(transport.fetch("https://api.telegram.org/botx/getMe")).rejects.toThrow(
+      "Telegram proxy is required",
+    );
+    expect(undiciFetch).not.toHaveBeenCalled();
+    expect(EnvHttpProxyAgentCtor).not.toHaveBeenCalled();
+    expect(AgentCtor).not.toHaveBeenCalled();
+  });
+
+  it("rejects a caller-provided dispatcher in the required route", async () => {
+    vi.stubEnv("https_proxy", "http://127.0.0.1:7890");
+    const transport = resolveTelegramTransport(undefined, { requireProxy: true });
+
+    await expect(
+      transport.fetch("https://api.telegram.org/botx/getMe", {
+        dispatcher: {} as unknown,
+      } as RequestInit),
+    ).rejects.toThrow("caller-provided direct dispatchers are not allowed");
+    expect(undiciFetch).not.toHaveBeenCalled();
+  });
+
+  it("derives the required policy from the active managed proxy marker", async () => {
+    vi.stubEnv("OPENCLAW_PROXY_ACTIVE", "1");
+
+    const transport = resolveTelegramTransport();
+
+    await expect(transport.fetch("https://api.telegram.org/botx/getMe")).rejects.toThrow(
+      "Telegram proxy is required",
+    );
+    expect(undiciFetch).not.toHaveBeenCalled();
+    expect(AgentCtor).not.toHaveBeenCalled();
+  });
+
   it("normalizes a full bot endpoint apiRoot before callers append bot paths", () => {
     expect(resolveTelegramApiBase("https://api.telegram.org/bot123456:ABC/")).toBe(
       "https://api.telegram.org",

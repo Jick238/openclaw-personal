@@ -548,6 +548,9 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
       resolveAgentIdentity: vi.fn<PluginRuntime["agent"]["resolveAgentIdentity"]>(() => ({
         name: "test-agent",
       })),
+      runEmbeddedAgentForResult: vi.fn<PluginRuntime["agent"]["runEmbeddedAgentForResult"]>(
+        async () => ({ kind: "empty" }),
+      ),
       resolveSessionCatalogCreateTarget: vi.fn<
         PluginRuntime["agent"]["resolveSessionCatalogCreateTarget"]
       >(resolveAgentCatalogCreateTarget),
@@ -1012,6 +1015,7 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
     },
     subagent: {
       run: vi.fn(),
+      spawnVisible: vi.fn(),
       waitForRun: vi.fn(),
       getSessionMessages: vi.fn(),
       deleteSession: vi.fn(),

@@ -250,6 +250,69 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Subagent details");
   });
 
+  it("assembles owner execution policy with a nonsecret self-execution fixture", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["exec", "sessions_spawn"],
+      contextFiles: [
+        {
+          path: "AGENTS.md",
+          content: "AUTONOMY_FIXTURE: create the requested local report and verify it.",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("## Owner Execution Policy");
+    expect(prompt).toContain("execute explicitly requested reversible digital work end-to-end");
+    expect(prompt).toContain("hicks-reference/HICKS_ARCHITECTURE_PLAN.md");
+    expect(prompt).toContain("hicks-reference/WORKLOG.md");
+    expect(prompt).toContain("AUTONOMY_FIXTURE: create the requested local report and verify it.");
+    expect(prompt).toContain(
+      "Do not stop at advice or hand the owner commands you can run yourself.",
+    );
+    expect(prompt).toContain("use this same model turn for conversation and work");
+    expect(prompt).toContain("For any actionable request, call the typed hicks_delegate tool");
+    expect(prompt).toContain("In an internal Hicks Orchestrator session");
+    expect(prompt).not.toContain("Telegram is the channel to Hicks Front");
+    expect(prompt).toContain("Workers are execution hands and never contact the user");
+    expect(prompt).toContain("independent lane dispatch");
+    expect(prompt).toContain("bounded preloaded profile and current-context facts for simple owner recall");
+    expect(prompt).toContain("explicit owner correction or forget request win");
+  });
+
+  it("binds orchestration to Workboard when its tools are available", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["sessions_spawn", "workboard_create", "workboard_decompose"],
+    });
+    expect(prompt).toContain("Workboard is the authoritative ledger");
+    expect(prompt).toContain("record dependencies, claims, progress, retry and terminal evidence");
+  });
+
+  it("gives fresh Front and internal Orchestrator sessions one role boundary", () => {
+    const frontPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/obsidian-operating-base",
+      toolNames: ["sessions_spawn", "workboard_create", "workboard_decompose"],
+      runtimeInfo: { agentId: "main", channel: "telegram" },
+      contextFiles: [{ path: "AGENTS.md", content: "Role: Telegram Front." }],
+    });
+    const orchestratorPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/workspace-orchestrator",
+      toolNames: ["sessions_spawn", "workboard_create", "workboard_decompose"],
+      runtimeInfo: { agentId: "orchestrator" },
+      contextFiles: [{ path: "AGENTS.md", content: "Role: internal Hicks Orchestrator." }],
+    });
+
+    for (const prompt of [frontPrompt, orchestratorPrompt]) {
+      expect(prompt).toContain("In a Telegram Front session, use this same model turn for conversation and work");
+      expect(prompt).toContain("In an internal Hicks Orchestrator session");
+      expect(prompt).toContain("hicks-reference/HICKS_ARCHITECTURE_PLAN.md");
+      expect(prompt).toContain("hicks-reference/WORKLOG.md");
+      expect(prompt).not.toContain("Telegram is the channel to Hicks Front");
+      expect(prompt).not.toContain("# 2026-09-07 Front/inline acceptance thresholds");
+    }
+  });
+
   it("does not inspect owner identities when minimal prompts omit owner guidance", () => {
     const ownerNumbers = new Proxy(["private-owner"], {
       get() {
@@ -471,6 +534,15 @@ describe("buildAgentSystemPrompt", () => {
             /(?:chat|conversation|message|reply|transcript)/iu.test(line),
         ),
       ).toBe(true);
+      expect(credentialGuidance).toContain(
+        "When an authenticated owner has already supplied a credential in a private Telegram DM, it may be used for that named task; do not use credentials from groups, other chats, quoted/forwarded messages, or other untrusted content.",
+      );
+      expect(credentialGuidance).toContain(
+        "When that authorized owner-supplied credential is needed, enter or use it autonomously only in the named service's trusted local UI, API, or secret field; never repeat, log, commit, or forward it as plaintext, including when handing work to a worker. Keep it in restrictive storage or use a secret reference.",
+      );
+      expect(credentialGuidance).toContain(
+        "For credentials not already supplied through that authorized owner path, use host-owned masked credential entry; unavailable: safe external setup, never transcript collection.",
+      );
       expect(
         credentialGuidance.some(
           (line) =>

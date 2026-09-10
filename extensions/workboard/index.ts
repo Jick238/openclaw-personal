@@ -4,6 +4,8 @@ import { registerWorkboardGatewayMethods } from "./runtime-api.js";
 import { createWorkboardAutomationNudgeService } from "./src/automation-nudge.js";
 import { createWorkboardChangeEventService } from "./src/change-events.js";
 import { registerWorkboardCommand } from "./src/command.js";
+import { createFrontAdmissionTool } from "./src/front-admission.js";
+import { registerFrontControlAction } from "./src/front-control.js";
 import {
   createWorkboardLifecycleService,
   readWorkboardLifecycleSessions,
@@ -16,6 +18,10 @@ import {
   guardWorkboardToolsForWorkspaceAccess,
   WORKBOARD_TOOL_NAMES,
 } from "./src/workspace-access.js";
+
+const WORKBOARD_OPTIONAL_TOOL_NAMES = WORKBOARD_TOOL_NAMES.filter(
+  (name) => name !== "hicks_delegate",
+);
 
 export default definePluginEntry({
   id: "workboard",
@@ -61,6 +67,7 @@ export default definePluginEntry({
       requiredScopes: ["operator.read"],
     });
     registerWorkboardGatewayMethods({ api, store });
+    registerFrontControlAction({ api, store });
     registerWorkboardCommand({ api, store });
     api.registerService(createWorkboardChangeEventService(store));
     api.registerService(automationNudge);
@@ -98,15 +105,18 @@ export default definePluginEntry({
         ],
       },
     );
+    api.registerTool((context) => [createFrontAdmissionTool({ api, context, store })], {
+      names: ["hicks_delegate"],
+    });
     api.registerTool(
       (context) =>
         guardWorkboardToolsForWorkspaceAccess(
           createWorkboardTools({ api, context, store }),
           context,
           api.runtime.sandbox.resolveWorkspaceAuthority,
-        ),
+        ).filter((tool) => tool.name !== "hicks_delegate"),
       {
-        names: [...WORKBOARD_TOOL_NAMES],
+        names: [...WORKBOARD_OPTIONAL_TOOL_NAMES],
         optional: true,
       },
     );

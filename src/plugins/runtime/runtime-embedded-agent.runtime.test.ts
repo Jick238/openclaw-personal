@@ -14,8 +14,10 @@ const mocks = vi.hoisted(() => ({
     runId,
   })),
   getRuntimeConfig: vi.fn(() => ({}) as OpenClawConfig),
+  loadSessionEntryReadOnly: vi.fn(),
   prepareAgentRunAdmission: vi.fn(),
   runEmbeddedAgentCore: vi.fn(),
+  warn: vi.fn(),
 }));
 
 vi.mock("../../agents/admitted-run-context.js", () => ({
@@ -28,9 +30,21 @@ vi.mock("../../agents/admitted-run-context.js", () => ({
 vi.mock("../../agents/embedded-agent.js", () => ({
   runEmbeddedAgent: mocks.runEmbeddedAgentCore,
 }));
+vi.mock("../../agents/embedded-agent-runner/logger.js", () => ({
+  log: { warn: mocks.warn },
+}));
 vi.mock("../../config/config.js", () => ({ getRuntimeConfig: mocks.getRuntimeConfig }));
+vi.mock("../../config/sessions/session-accessor.js", () => ({
+  loadSessionEntryReadOnly: mocks.loadSessionEntryReadOnly,
+}));
+vi.mock("../../config/sessions/paths.js", () => ({
+  resolveSessionStorePathCore: vi.fn(() => "/tmp/sessions"),
+}));
 
-import { runPluginEmbeddedAgent } from "./runtime-embedded-agent.runtime.js";
+import {
+  runPluginEmbeddedAgent,
+  runPluginEmbeddedAgentForResult,
+} from "./runtime-embedded-agent.runtime.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -69,6 +83,191 @@ describe("plugin embedded-agent runtime admission", () => {
       close: mocks.close,
     });
     mocks.runEmbeddedAgentCore.mockResolvedValue({ payloads: [] });
+    mocks.loadSessionEntryReadOnly.mockReturnValue(undefined);
+  });
+
+  it("returns only final non-commentary text for an external turn", async () => {
+    mocks.runEmbeddedAgentCore.mockResolvedValueOnce({
+      payloads: [{ text: "thinking", isCommentary: true }, { text: "final answer" }],
+    });
+
+    await expect(
+      withPluginRuntimePluginIdScope("telegram", () =>
+        runPluginEmbeddedAgentForResult({
+          channel: "telegram",
+          accountId: "default",
+          agentId: "main",
+          sessionKey: "telegram:inline:default:42",
+          prompt: "hello",
+          senderId: "42",
+          senderIsOwner: true,
+          currentChannelId: "telegram:777",
+          currentMessagingTarget: "telegram:777",
+          timeoutMs: 5_000,
+        }),
+      ),
+    ).resolves.toEqual({ kind: "completed", text: "final answer" });
+
+    expect(mocks.runEmbeddedAgentCore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageChannel: "telegram",
+        sourceReplyDeliveryMode: "message_tool_only",
+        disableMessageTool: true,
+        terminalReplyExpectation: "required",
+        senderIsOwner: true,
+        messageTo: "telegram:42",
+        currentChannelId: "telegram:777",
+        currentMessagingTarget: "telegram:777",
+        deferTerminalLifecycle: true,
+        onDeferredLifecycleOwner: expect.any(Function),
+      }),
+    );
+  });
+
+  it("keeps a Guest result alive past 9s when no caller timeout is supplied", async () => {
+    vi.useFakeTimers();
+    const core = deferred<{ payloads: Array<{ text: string }> }>();
+    mocks.runEmbeddedAgentCore.mockReturnValueOnce(core.promise);
+    const run = withPluginRuntimePluginIdScope("telegram", () =>
+      runPluginEmbeddedAgentForResult({
+        channel: "telegram",
+        accountId: "default",
+        agentId: "main",
+        sessionKey: "telegram:guest:default:42",
+        prompt: "slow guest question",
+        senderId: "42",
+      }),
+    );
+
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(9_001);
+    core.resolve({ payloads: [{ text: "late answer" }] });
+    await Promise.resolve();
+    expect(mocks.runEmbeddedAgentCore).toHaveBeenCalledWith(
+      expect.not.objectContaining({ timeoutMs: expect.anything() }),
+    );
+    await expect(run).resolves.toEqual({ kind: "completed", text: "late answer" });
+    expect(mocks.close).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("returns the terminal result before deferred cleanup settles", async () => {
+    const cleanup = deferred<void>();
+    const cleanupComplete = vi.fn(() => cleanup.promise);
+    mocks.runEmbeddedAgentCore.mockImplementationOnce(async (input) => {
+      input.onDeferredLifecycleOwner?.({ complete: cleanupComplete, discard: vi.fn() });
+      return { payloads: [{ text: "ready before telemetry" }] };
+    });
+
+    const run = withPluginRuntimePluginIdScope("telegram", () =>
+      runPluginEmbeddedAgentForResult({
+        channel: "telegram",
+        accountId: "default",
+        agentId: "main",
+        sessionKey: "telegram:guest:default:42",
+        prompt: "hello",
+        senderId: "42",
+        timeoutMs: 5_000,
+      }),
+    );
+
+    await expect(run).resolves.toEqual({ kind: "completed", text: "ready before telemetry" });
+    expect(cleanupComplete).toHaveBeenCalledOnce();
+    expect(mocks.close).not.toHaveBeenCalled();
+    cleanup.resolve();
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledOnce());
+  });
+
+  it("keeps a completed result when deferred cleanup fails", async () => {
+    const cleanupError = new Error("trajectory unavailable");
+    mocks.runEmbeddedAgentCore.mockImplementationOnce(async (input) => {
+      input.onDeferredLifecycleOwner?.({
+        complete: async () => {
+          throw cleanupError;
+        },
+        discard: vi.fn(),
+      });
+      return { payloads: [{ text: "delivered once" }] };
+    });
+
+    await expect(
+      withPluginRuntimePluginIdScope("telegram", () =>
+        runPluginEmbeddedAgentForResult({
+          channel: "telegram",
+          accountId: "default",
+          sessionKey: "telegram:guest:default:42",
+          prompt: "hello",
+          senderId: "42",
+          timeoutMs: 5_000,
+        }),
+      ),
+    ).resolves.toEqual({ kind: "completed", text: "delivered once" });
+    await vi.waitFor(() => expect(mocks.close).toHaveBeenCalledOnce());
+    expect(mocks.warn).toHaveBeenCalledWith(
+      expect.stringContaining("plugin result-only deferred lifecycle cleanup failed"),
+      { error: cleanupError },
+    );
+  });
+
+  it("uses the current durable session generation for an external turn", async () => {
+    mocks.loadSessionEntryReadOnly.mockReturnValue({ sessionId: "current-session" });
+
+    await withPluginRuntimePluginIdScope("telegram", () =>
+      runPluginEmbeddedAgentForResult({
+        channel: "telegram",
+        accountId: "default",
+        agentId: "main",
+        sessionKey: "agent:main:telegram:direct:42",
+        prompt: "arbitrary question",
+        senderId: "42",
+        timeoutMs: 5_000,
+      }),
+    );
+
+    expect(mocks.runEmbeddedAgentCore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "current-session",
+        sessionTarget: expect.objectContaining({
+          sessionId: "current-session",
+          sessionKey: "agent:main:telegram:direct:42",
+        }),
+      }),
+    );
+  });
+
+  it("classifies runner failures and error payloads instead of returning selectable text", async () => {
+    mocks.runEmbeddedAgentCore.mockRejectedValueOnce(new Error("app-server unavailable"));
+
+    await expect(
+      withPluginRuntimePluginIdScope("telegram", () =>
+        runPluginEmbeddedAgentForResult({
+          channel: "telegram",
+          accountId: "default",
+          agentId: "main",
+          sessionKey: "telegram:inline:default:42",
+          prompt: "hello",
+          senderId: "42",
+          timeoutMs: 5_000,
+        }),
+      ),
+    ).resolves.toEqual({ kind: "error", code: "failed" });
+
+    mocks.runEmbeddedAgentCore.mockResolvedValueOnce({
+      payloads: [{ text: "provider failed", isError: true }],
+    });
+    await expect(
+      withPluginRuntimePluginIdScope("telegram", () =>
+        runPluginEmbeddedAgentForResult({
+          channel: "telegram",
+          accountId: "default",
+          agentId: "main",
+          sessionKey: "telegram:inline:default:42",
+          prompt: "hello",
+          senderId: "42",
+          timeoutMs: 5_000,
+        }),
+      ),
+    ).resolves.toEqual({ kind: "error", code: "failed" });
   });
 
   it("binds plugin facts and closes the exact prepared admission after success", async () => {

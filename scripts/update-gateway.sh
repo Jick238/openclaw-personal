@@ -12,6 +12,12 @@
 # Environment:
 #   OPENCLAW_UPDATE_RESTART_CMD  restart command (default: openclaw gateway restart)
 #                                set to "" to skip the restart step
+#   OPENCLAW_UPDATE_INSTALL_ROOT when set, use the checked-in full-bundle
+#                                transaction instead of restarting the checkout
+#   OPENCLAW_UPDATE_WORKSPACE_ROOT Hicks agent workspace to receive the
+#                                versioned owner-policy/reference bundle
+#   OPENCLAW_UPDATE_STATE_DIR state/config directory kept outside the install
+#                             root for full-bundle rollback and legacy archives
 #   OPENCLAW_UPDATE_REMOTE       git remote to update from (default: origin)
 set -euo pipefail
 
@@ -28,6 +34,15 @@ trap on_exit EXIT
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+
+if [ -n "${OPENCLAW_UPDATE_INSTALL_ROOT:-}" ]; then
+  for required in OPENCLAW_UPDATE_WORKSPACE_ROOT OPENCLAW_UPDATE_STATE_DIR; do
+    if [ -z "${!required:-}" ]; then
+      log "$required is required for Hicks full-bundle deployment; no Gateway stop was attempted"
+      exit 1
+    fi
+  done
+fi
 
 # Create private shims before fetching; target compatibility needs an invocation
 # after fetch, before checkout mutation. Never activate a global version.
@@ -141,7 +156,20 @@ done
 run_pnpm build
 
 restart_cmd="${OPENCLAW_UPDATE_RESTART_CMD-openclaw gateway restart}"
-if [ -n "$restart_cmd" ]; then
+if [ -n "${OPENCLAW_UPDATE_INSTALL_ROOT:-}" ]; then
+  log "deploying complete runtime bundle to $OPENCLAW_UPDATE_INSTALL_ROOT"
+  if [ -z "${OPENCLAW_UPDATE_WORKSPACE_ROOT:-}" ]; then
+    log "OPENCLAW_UPDATE_WORKSPACE_ROOT is required for Hicks full-bundle deployment"
+    exit 1
+  fi
+  deploy_args=(
+    --source-root "$repo_root"
+    --install-root "$OPENCLAW_UPDATE_INSTALL_ROOT"
+  )
+  deploy_args+=(--workspace-root "$OPENCLAW_UPDATE_WORKSPACE_ROOT")
+  deploy_args+=(--state-dir "$OPENCLAW_UPDATE_STATE_DIR")
+  node scripts/hicks-deploy-runtime.mjs "${deploy_args[@]}"
+elif [ -n "$restart_cmd" ]; then
   log "restarting gateway: $restart_cmd"
   bash -c "$restart_cmd"
 else

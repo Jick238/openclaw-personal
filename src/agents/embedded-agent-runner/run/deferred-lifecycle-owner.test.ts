@@ -85,4 +85,24 @@ describe("deferred logical-turn lifecycle", () => {
     expect(flush).toHaveBeenCalledOnce();
     expect(clearActiveRun).toHaveBeenCalledTimes(2);
   });
+
+  it("flushes an already-recorded terminal trajectory before releasing the run", async () => {
+    const flush = vi.fn(async () => undefined);
+    const clearActiveRun = vi.fn();
+    const owner = createEmbeddedAttemptDeferredLifecycleOwner({
+      runId: "logical-run",
+      sessionId,
+      trajectoryRecorder: {
+        recordEvent: vi.fn(),
+        flush,
+        describeFlushState: () => undefined,
+      },
+      clearActiveRun,
+    });
+
+    await owner.complete();
+
+    expect(flush).toHaveBeenCalledOnce();
+    expect(clearActiveRun).toHaveBeenCalledOnce();
+  });
 });

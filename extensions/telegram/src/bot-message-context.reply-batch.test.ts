@@ -67,6 +67,22 @@ describe("buildTelegramMessageContext reply/quote debounce batches", () => {
     expect(context?.ctxPayload.Body).toContain(QUOTED_LINE);
   });
 
+  it("exposes the selected reply to the Front hook context", async () => {
+    const context = await buildTelegramMessageContextForTest({
+      message: quotingMessage(2, "напомни об этой встрече"),
+    });
+
+    expect(context?.ctxPayload.ChannelContext).toMatchObject({
+      sender: { id: "42" },
+      chat: {
+        id: "999",
+        replyToId: "90",
+        replyToBody: QUOTED_LINE,
+        replyToSender: "Bob",
+      },
+    });
+  });
+
   it("keeps cached first-message ancestry after a quote-only follow-up", async () => {
     const first = quotingMessage(1, "first ask");
     const context = await buildTelegramMessageContextForTest({

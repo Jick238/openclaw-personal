@@ -207,7 +207,7 @@ export async function handleToolExecutionEnd(
     ...(codeModeSuspended ? { codeModeSuspended: true } : {}),
   });
   const acceptedSessionSpawn =
-    toolName === "sessions_spawn" && !isToolError
+    (toolName === "sessions_spawn" || toolName === "hicks_delegate") && !isToolError
       ? normalizeAcceptedSessionSpawnResult(sanitizedResult)
       : null;
   if (acceptedSessionSpawn) {

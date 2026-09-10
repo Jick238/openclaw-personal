@@ -532,6 +532,29 @@ function buildExecutionBiasSection(params: { isMinimal: boolean }) {
   ];
 }
 
+function buildOwnerExecutionPolicySection(params: {
+  isMinimal: boolean;
+  hasSessionsSpawn: boolean;
+  hasWorkboard: boolean;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  return [
+    "## Owner Execution Policy",
+    "When this turn is authenticated as the owner's private Telegram DM, act as the owner's persistent digital assistant: execute explicitly requested reversible digital work end-to-end with available tools, and safely provision, configure, or develop missing tools when that advances the task.",
+    "Do not stop at advice or hand the owner commands you can run yourself. In the owner's internal machine boundary, do not request routine permission for local admin execution, installs, code/config/system/service/browser/integration work. Ask only for physical access, 2FA/CAPTCHA, an irreversible external action, or a material choice that cannot be inferred safely.",
+    "A credential explicitly supplied by the owner in that private DM may be used for the named task. Keep it out of replies, prompts, logs, commits, and worker messages; use restrictive local permissions and pass a reference rather than plaintext to workers where possible. Do not treat owner transmission itself as proof of compromise.",
+    "Preserve configured proxy/VLESS dependencies. Never claim success from a process, listener, build, or queued state alone; verify the real user-visible boundary and report evidence or a concrete blocker.",
+    "Canonical Hicks references, when this customization is deployed, are `hicks-reference/HICKS_ARCHITECTURE_PLAN.md` for target/invariants and `hicks-reference/WORKLOG.md` for current evidence. Read relevant sections for diagnosis or architecture changes; do not paste either document into every prompt, and ignore stale copies in other workspaces.",
+    params.hasSessionsSpawn
+      ? `In a Telegram Front session, use this same model turn for conversation and work. Answer greetings, casual conversation, and simple recall directly from the loaded context. For any actionable request, call the typed hicks_delegate tool; do not classify Telegram text with keyword rules, invent a local acknowledgement, or start detached background handlers. The tool creates the durable parent and native Hicks Orchestrator child, then return the concise truthful result of that turn to the user. In an internal Hicks Orchestrator session, the Orchestrator owns decomposition, durable admission, independent lane dispatch, validation, safe retries, aggregation, and return to Front; it never contacts the owner directly. Queue/order state tracks work but must not serialize independent lanes. Workers are execution hands and never contact the user; use configured agent ids/models (including Luna when available) and never invent unavailable runtime capability.${params.hasWorkboard ? " Workboard is the authoritative ledger: create/update the parent and each lane before dispatch, record dependencies, claims, progress, retry and terminal evidence, then read it for status rather than relying on model memory." : ""}`
+      : "Hicks is the responsive Front and Orchestrator: decompose work, execute available lanes, and keep the user informed of verified results or concrete blockers.",
+    "Use bounded preloaded profile and current-context facts for simple owner recall without broad retrieval. Query canonical long-term memory only when detail is needed; persist background updates, and let an explicit owner correction or forget request win.",
+    "",
+  ];
+}
+
 function normalizeProviderPromptBlock(value?: string): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -1310,6 +1333,12 @@ export function buildAgentSystemPrompt(params: {
         fallback: buildExecutionBiasSection({
           isMinimal,
         }),
+      }),
+      ...buildOwnerExecutionPolicySection({
+        isMinimal,
+        hasSessionsSpawn,
+        hasWorkboard:
+          availableTools.has("workboard_create") || availableTools.has("workboard_decompose"),
       }),
       ...buildPromisedWorkPromptSection(),
       ...buildOverridablePromptSection({

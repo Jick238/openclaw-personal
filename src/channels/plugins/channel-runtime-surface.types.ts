@@ -36,6 +36,56 @@ export type ChannelRuntimeContextRegistry = {
   }) => () => void;
 };
 
+export type ChannelExternalTurnRequest = {
+  channel: string;
+  accountId: string;
+  agentId?: string;
+  sessionKey: string;
+  prompt: string;
+  senderId: string;
+  senderUsername?: string;
+  senderIsOwner?: boolean;
+  correlationId?: string;
+  currentChannelId?: string;
+  currentMessagingTarget?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+};
+
+export type ChannelExternalTurnResult =
+  | { kind: "completed"; text: string }
+  | { kind: "empty" }
+  | { kind: "timeout" }
+  | { kind: "error"; code: "failed" | "aborted" };
+
+export type ChannelExternalTurnRunner = (
+  request: ChannelExternalTurnRequest,
+) => Promise<ChannelExternalTurnResult>;
+
+export type ChannelExternalTaskCommitRequest = {
+  channel: string;
+  accountId: string;
+  agentId: string;
+  senderId: string;
+  senderUsername?: string;
+  sessionKey: string;
+  prompt: string;
+  correlationId: string;
+  signal?: AbortSignal;
+};
+
+export type ChannelExternalTaskCommitResult =
+  | { kind: "accepted"; taskId: string }
+  | {
+      kind: "unavailable";
+      code: "unsupported" | "unauthorized" | "failed";
+      reason?: "gateway_unavailable" | "unauthorized" | "rejected" | "failed";
+    };
+
+export type ChannelExternalTaskCommitter = (
+  request: ChannelExternalTaskCommitRequest,
+) => Promise<ChannelExternalTaskCommitResult>;
+
 /**
  * Minimal channel-runtime surface exported through the public plugin SDK.
  *
@@ -44,5 +94,9 @@ export type ChannelRuntimeContextRegistry = {
  */
 export type ChannelRuntimeSurface = {
   runtimeContexts: ChannelRuntimeContextRegistry;
+  externalTurns?: {
+    runResultOnly: ChannelExternalTurnRunner;
+    commitTask?: ChannelExternalTaskCommitter;
+  };
   [key: string]: unknown;
 };

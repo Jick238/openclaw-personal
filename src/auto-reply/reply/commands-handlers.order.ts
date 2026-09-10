@@ -2,6 +2,7 @@
 // The runtime map must cover this complete union before it can build the list.
 export const commandHandlerOrder = [
   // Plugin text commands must win before built-in auth routing handles /login.
+  "plugin-session-action",
   "plugin",
   "login",
   "dock",

@@ -677,6 +677,7 @@ async function resolveTelegramTargets(params: {
           proxyUrl: account.config.proxy,
           apiRoot: account.config.apiRoot,
           network: account.config.network,
+          requireProxy: params.cfg.proxy?.enabled === true,
         });
         if (!id) {
           return {
@@ -941,6 +942,7 @@ export const telegramPlugin = createChatChannelPlugin({
           network: account.config.network,
           apiRoot: account.config.apiRoot,
           includeWebhookInfo: Boolean(account.config.webhookUrl),
+          requireProxy: process.env["OPENCLAW_PROXY_ACTIVE"] === "1",
         }),
       formatCapabilitiesProbe: ({ probe }) => {
         const lines = [];
@@ -957,6 +959,9 @@ export const telegramPlugin = createChatChannelPlugin({
         }
         if (typeof probe?.bot?.supportsInlineQueries === "boolean") {
           flags.push(`inlineQueries=${probe.bot.supportsInlineQueries}`);
+        }
+        if (typeof probe?.bot?.supportsGuestQueries === "boolean") {
+          flags.push(`guestQueries=${probe.bot.supportsGuestQueries}`);
         }
         if (flags.length > 0) {
           lines.push({ text: `Flags: ${flags.join(" ")}` });
@@ -1070,6 +1075,7 @@ export const telegramPlugin = createChatChannelPlugin({
               network: account.config.network,
               apiRoot: account.config.apiRoot,
               includeWebhookInfo: false,
+              requireProxy: ctx.cfg.proxy?.enabled === true,
               abortSignal: ctx.abortSignal,
             }),
           );

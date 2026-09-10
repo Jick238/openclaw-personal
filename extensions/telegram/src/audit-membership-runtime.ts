@@ -39,6 +39,7 @@ export async function auditTelegramGroupMembershipImpl(
   const proxyFetch = params.proxyUrl ? makeProxyFetch(params.proxyUrl) : undefined;
   const fetcher = resolveTelegramFetch(proxyFetch, {
     network: params.network,
+    ...(params.requireProxy === true ? { requireProxy: true } : {}),
   });
   const apiBase = resolveTelegramApiBase(params.apiRoot);
   const base = `${apiBase}/bot${params.token}`;

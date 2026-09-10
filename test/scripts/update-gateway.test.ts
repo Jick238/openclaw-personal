@@ -16,6 +16,33 @@ import { describe, expect, it } from "vitest";
 import { linkPnpmBootstrapShellTools } from "./test-helpers.js";
 
 describe("source-server updater bootstrap", () => {
+  it("requires the full-bundle state root before bootstrap and propagates it", () => {
+    const root = mkdtempSync(join(tmpdir(), "openclaw-update-state-preflight-"));
+    const repo = join(root, "repo");
+    mkdirSync(join(repo, "scripts"), { recursive: true });
+    mkdirSync(join(repo, ".git"));
+    const script = join(repo, "scripts/update-gateway.sh");
+    const source = readFileSync("scripts/update-gateway.sh", "utf8");
+    writeFileSync(script, source);
+    try {
+      const result = spawnSync("/bin/bash", [script], {
+        encoding: "utf8",
+        env: {
+          PATH: "/nonexistent",
+          OPENCLAW_UPDATE_INSTALL_ROOT: "/install",
+          OPENCLAW_UPDATE_WORKSPACE_ROOT: "/workspace",
+        },
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout + result.stderr).toContain(
+        "OPENCLAW_UPDATE_STATE_DIR is required for Hicks full-bundle deployment",
+      );
+      expect(source).toContain('deploy_args+=(--state-dir "$OPENCLAW_UPDATE_STATE_DIR")');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it.each(
     [
       "success",
@@ -46,8 +73,9 @@ describe("source-server updater bootstrap", () => {
     const repo = join(root, "repo");
     const bin = join(root, "bin");
     const temp = join(root, "temp");
-    for (const dir of [join(repo, "scripts"), join(repo, ".git"), bin, temp])
+    for (const dir of [join(repo, "scripts"), join(repo, ".git"), bin, temp]) {
       mkdirSync(dir, { recursive: true });
+    }
     linkPnpmBootstrapShellTools(bin);
     symlinkSync(process.execPath, join(bin, "node"));
     const script = join(repo, "scripts/update-gateway.sh");
@@ -155,7 +183,7 @@ NODE
       esac
     `,
     );
-    if (scenario !== "missing")
+    if (scenario !== "missing") {
       executable(
         "corepack",
         `
@@ -165,8 +193,13 @@ NODE
       cp "$FIXTURE/bin/selected" "$3/pnpm"
     `,
       );
-    if (scenario === "symlink") symlinkSync(root, join(repo, "dist"));
-    if (scenario === "interrupted") mkdirSync(join(repo, ".git/rebase-merge"));
+    }
+    if (scenario === "symlink") {
+      symlinkSync(root, join(repo, "dist"));
+    }
+    if (scenario === "interrupted") {
+      mkdirSync(join(repo, ".git/rebase-merge"));
+    }
     try {
       const result = spawnSync("/bin/bash", [script], {
         encoding: "utf8",
@@ -235,8 +268,9 @@ NODE
                 ? ["probe", "install"]
                 : ["probe"],
       );
-      if (beforeFetch) expect(existsSync(join(root, "git-mutations"))).toBe(false);
-      else if (!preflightFailure) {
+      if (beforeFetch) {
+        expect(existsSync(join(root, "git-mutations"))).toBe(false);
+      } else if (!preflightFailure) {
         expect(lines("git-calls")).toContain(`show ${targetSha}:package.json`);
         expect(lines("git-mutations")).toEqual([
           "fetch origin main",
@@ -245,13 +279,16 @@ NODE
             : `rebase --rebase-merges ${targetSha}`,
           ...(scenario === "rebase-failure" ? ["rebase --abort"] : []),
         ]);
-        if (scenario !== "rebase-failure")
+        if (scenario !== "rebase-failure") {
           expect(readFileSync(join(repo, ".git/HEAD"), "utf8")).toBe(targetSha);
+        }
       }
-      if (scenario === "missing" || scenario === "enable-failure")
+      if (scenario === "missing" || scenario === "enable-failure") {
         expect(result.stdout + result.stderr).toContain("Corepack");
-      if (scenario === "rebase-failure")
+      }
+      if (scenario === "rebase-failure") {
         expect(readFileSync(join(root, "git-mutations"), "utf8")).toContain("rebase --abort");
+      }
       expect(readFileSync(join(repo, "pnpm-lock.yaml"), "utf8")).toBe("untouched\n");
       expect(readFileSync(join(repo, "pnpm-workspace.yaml"), "utf8")).toBe("packages: []\n");
       expect(readdirSync(temp)).toEqual([]);

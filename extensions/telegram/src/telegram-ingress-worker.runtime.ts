@@ -40,6 +40,14 @@ const TELEGRAM_RETRY_BACKOFF_POLICY: BackoffPolicy = {
   jitter: 0,
 };
 
+function isGuestFastPathUpdate(update: unknown): boolean {
+  return Boolean(
+    update &&
+    typeof update === "object" &&
+    "guest_message" in update,
+  );
+}
+
 type TelegramGetUpdatesJson = {
   ok?: unknown;
   error_code?: unknown;
@@ -189,7 +197,10 @@ export async function runTelegramIngressWorkerRuntime(params: {
   const proxyFetch = options.proxy ? makeProxyFetch(options.proxy) : undefined;
   const transport =
     params.deps?.fetch === undefined
-      ? resolveTelegramTransport(proxyFetch, { network: options.network })
+      ? resolveTelegramTransport(proxyFetch, {
+          network: options.network,
+          requireProxy: options.requireProxy === true,
+        })
       : undefined;
   const fetchImpl = params.deps?.fetch ?? transport?.fetch ?? globalThis.fetch;
   const closeTransport =
@@ -226,15 +237,16 @@ export async function runTelegramIngressWorkerRuntime(params: {
     pending.reject(new Error(message.result.message));
   });
 
-  const requestSpoolUpdate = async (requestParams: {
+  const requestIngressUpdate = async (requestParams: {
     update: unknown;
     queued: number;
+    fastPath: boolean;
   }): Promise<number> => {
     const requestId = String(++nextSpoolRequestId);
     const updateId = await new Promise<number>((resolve, reject) => {
       pendingSpoolRequests.set(requestId, { resolve, reject });
       port.postMessage({
-        type: "update",
+        type: requestParams.fastPath ? "fast-path" : "update",
         requestId,
         update: requestParams.update,
         queued: requestParams.queued,
@@ -274,7 +286,11 @@ export async function runTelegramIngressWorkerRuntime(params: {
           if (stopped) {
             break;
           }
-          const updateId = await requestSpoolUpdate({ update, queued: result.length });
+          const updateId = await requestIngressUpdate({
+            update,
+            queued: result.length,
+            fastPath: isGuestFastPathUpdate(update),
+          });
           if (lastUpdateId === null || updateId > lastUpdateId) {
             lastUpdateId = updateId;
           }

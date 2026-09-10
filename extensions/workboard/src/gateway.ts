@@ -1,7 +1,9 @@
 // Workboard plugin module implements gateway behavior.
 import type { WorkboardCard } from "@openclaw/workboard-contract";
+import { resolveCommandAuthorization } from "openclaw/plugin-sdk/command-auth-native";
 import type { OpenClawPluginApi } from "../api.js";
 import { redactClaimToken } from "./card-redaction.js";
+import { admitFrontTask } from "./front-admission.js";
 import {
   assertNoCursorAdvance,
   createWorkboardDispatchHandler,
@@ -45,6 +47,75 @@ export function registerWorkboardGatewayMethods(params: {
     store,
     redactCard: redactClaimToken,
   });
+
+  api.registerGatewayMethod(
+    "workboard.front.admit",
+    async (context) => {
+      const requestParams = context.params as Record<string, unknown>;
+      const channel = typeof requestParams.channel === "string" ? requestParams.channel.trim() : "";
+      const agentId = typeof requestParams.agentId === "string" ? requestParams.agentId.trim() : "";
+      const sessionKey =
+        typeof requestParams.sessionKey === "string" ? requestParams.sessionKey.trim() : "";
+      const goal = typeof requestParams.prompt === "string" ? requestParams.prompt.trim() : "";
+      const idempotencyKey =
+        typeof requestParams.correlationId === "string" ? requestParams.correlationId.trim() : "";
+      const senderId =
+        typeof requestParams.senderId === "string" ? requestParams.senderId.trim() : "";
+      const senderUsername =
+        typeof requestParams.senderUsername === "string"
+          ? requestParams.senderUsername.trim()
+          : undefined;
+      const accountId =
+        typeof requestParams.accountId === "string" ? requestParams.accountId.trim() : "";
+      const pluginOwner = context.client?.internal?.pluginRuntimeOwnerId;
+      const ownerAccess = resolveCommandAuthorization({
+        ctx: {
+          Provider: "telegram",
+          Surface: "telegram",
+          OriginatingChannel: "telegram",
+          AccountId: accountId,
+          ChatType: "direct",
+          From: `telegram:${senderId}`,
+          To: `telegram:${senderId}`,
+          SenderId: senderId,
+          SenderUsername: senderUsername,
+        },
+        cfg: context.context.getRuntimeConfig(),
+        commandAuthorized: false,
+      });
+      if (
+        pluginOwner !== "telegram" ||
+        channel !== "telegram" ||
+        agentId !== "main" ||
+        !senderId ||
+        !accountId ||
+        !ownerAccess.senderIsOwner ||
+        !sessionKey.includes(":telegram:") ||
+        sessionKey.includes(":group:") ||
+        !goal ||
+        !idempotencyKey
+      ) {
+        throw new Error(
+          "workboard.front.admit requires agentId, sessionKey, prompt, and correlationId.",
+        );
+      }
+      const result = await admitFrontTask({
+        api,
+        store,
+        agentId,
+        sessionKey,
+        goal,
+        idempotencyKey,
+        requesterOrigin: {
+          channel: "telegram",
+          accountId,
+          to: `telegram:${senderId}`,
+        },
+      });
+      context.respond(true, { kind: "accepted", taskId: result.card.id, ...result });
+    },
+    { scope: WRITE_SCOPE },
+  );
 
   registerWorkboardResultMethods(api, [
     [

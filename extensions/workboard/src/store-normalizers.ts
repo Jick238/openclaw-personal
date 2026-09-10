@@ -431,6 +431,12 @@ export function normalizeAutomation(
   const boardId = Object.hasOwn(record, "boardId")
     ? normalizeBoardId(record.boardId, fallback.boardId)
     : fallback.boardId;
+  const requesterSessionKey = normalizeBoundedString(
+    record.requesterSessionKey,
+    fallback.requesterSessionKey,
+    400,
+    "requester session key",
+  );
   const createdByCardId = normalizeBoundedString(
     record.createdByCardId,
     fallback.createdByCardId,
@@ -476,6 +482,7 @@ export function normalizeAutomation(
   const next = removeUndefinedAutomationFields({
     ...(tenant ? { tenant } : {}),
     ...(boardId ? { boardId } : {}),
+    ...(requesterSessionKey ? { requesterSessionKey } : {}),
     ...(createdByCardId ? { createdByCardId } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(skills?.length ? { skills } : {}),
@@ -1225,6 +1232,7 @@ function removeUndefinedAutomationFields(automation: WorkboardAutomation): Workb
   for (const key of [
     "tenant",
     "boardId",
+    "requesterSessionKey",
     "createdByCardId",
     "idempotencyKey",
     "skills",

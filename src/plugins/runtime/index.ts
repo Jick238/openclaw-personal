@@ -176,6 +176,7 @@ function createUnavailableSubagentRuntime(): PluginRuntime["subagent"] {
   };
   return {
     run: unavailable,
+    spawnVisible: unavailable,
     waitForRun: unavailable,
     getSessionMessages: unavailable,
     deleteSession: unavailable,
@@ -266,11 +267,12 @@ export const createPluginRuntime: PluginRuntimeFactory = (
     managedTaskFlow: taskFlow,
   });
   const agent = createRuntimeAgent();
+  const gateway = _options.gateway ?? createRuntimeGateway();
   const runtime = {
     // Sourced from the shared OpenClaw version resolver (#52899) so plugins
     // always see the same version the CLI reports, avoiding API-version drift.
     version: VERSION,
-    gateway: _options.gateway ?? createRuntimeGateway(),
+    gateway,
     config: initialRuntime.config,
     agent,
     hooks: _options.hooks ?? {
@@ -290,8 +292,51 @@ export const createPluginRuntime: PluginRuntimeFactory = (
     },
     channel: createRuntimeChannel(
       _options.dispatchReplyFromConfig
-        ? { dispatchReplyFromConfig: _options.dispatchReplyFromConfig }
-        : undefined,
+        ? {
+            dispatchReplyFromConfig: _options.dispatchReplyFromConfig,
+            externalTurns: {
+              runResultOnly: agent.runEmbeddedAgentForResult,
+              commitTask: async (request) => {
+                try {
+                  return await gateway.request<
+                    import("../../channels/plugins/channel-runtime-surface.types.js").ChannelExternalTaskCommitResult
+                  >("workboard.front.admit", request);
+                } catch (error) {
+                  console.warn(
+                    "[plugin-runtime] external task commit failed",
+                    error instanceof Error ? error.name : "unknown",
+                  );
+                  return {
+                    kind: "unavailable" as const,
+                    code: "failed" as const,
+                    reason: "failed" as const,
+                  };
+                }
+              },
+            },
+          }
+        : {
+            externalTurns: {
+              runResultOnly: agent.runEmbeddedAgentForResult,
+              commitTask: async (request) => {
+                try {
+                  return await gateway.request<
+                    import("../../channels/plugins/channel-runtime-surface.types.js").ChannelExternalTaskCommitResult
+                  >("workboard.front.admit", request);
+                } catch (error) {
+                  console.warn(
+                    "[plugin-runtime] external task commit failed",
+                    error instanceof Error ? error.name : "unknown",
+                  );
+                  return {
+                    kind: "unavailable" as const,
+                    code: "failed" as const,
+                    reason: "failed" as const,
+                  };
+                }
+              },
+            },
+          },
     ),
     events: createRuntimeEvents(),
     logging: createRuntimeLogging(),

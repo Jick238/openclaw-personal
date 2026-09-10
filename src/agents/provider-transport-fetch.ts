@@ -902,6 +902,11 @@ export function buildGuardedModelFetch(
     let result: Awaited<ReturnType<typeof fetchWithSsrFGuard>>;
     const fetchStartedAt = Date.now();
     const useEnvProxy = !dispatcherPolicy && shouldUseEnvHttpProxyForUrl(url);
+    if (process.env["OPENCLAW_PROXY_ACTIVE"] === "1" && !dispatcherPolicy && !useEnvProxy) {
+      throw new Error(
+        "Model provider proxy is required while the managed proxy is active, but no proxy route is available",
+      );
+    }
     emitModelTransportDebug(
       log,
       `[model-fetch] start provider=${model.provider} api=${model.api} model=${model.id} ` +

@@ -175,6 +175,7 @@ describe("buildGuardedModelFetch", () => {
     delete process.env.OPENCLAW_DEBUG_PROXY_ENABLED;
     delete process.env.OPENCLAW_DEBUG_PROXY_URL;
     delete process.env.OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS;
+    delete process.env.OPENCLAW_PROXY_ACTIVE;
   });
 
   afterEach(() => {
@@ -310,6 +311,15 @@ describe("buildGuardedModelFetch", () => {
       },
     });
     expect(params.dispatcherPool).toBeDefined();
+  });
+
+  it("fails closed when the managed proxy is active but the model has no proxy route", async () => {
+    process.env.OPENCLAW_PROXY_ACTIVE = "1";
+
+    await expect(
+      buildGuardedModelFetch(sentinelModel())("https://api.openai.com/v1/responses"),
+    ).rejects.toThrow("Model provider proxy is required");
+    expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
   });
 
   it("rejects successful streamed OpenAI-compatible responses with HTML content", async () => {

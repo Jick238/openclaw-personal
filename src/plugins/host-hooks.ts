@@ -116,11 +116,31 @@ export type PluginControlUiDescriptor = {
   order?: number;
 };
 
+/**
+ * Host-authenticated inbound command facts for an internal action bridge.
+ * These facts are supplied by the command dispatcher, never decoded from the
+ * action payload, so a Gateway caller cannot forge channel or owner state.
+ */
+type PluginSessionActionCommandContext = {
+  source: "command";
+  channel: string;
+  chatType?: string;
+  channelId?: string;
+  accountId?: string;
+  senderId?: string;
+  senderIsOwner: boolean;
+  isAuthorizedSender: boolean;
+  from?: string;
+  to?: string;
+};
+
 export type PluginSessionActionContext = {
   pluginId: string;
   actionId: string;
   sessionKey?: string;
   agentId?: string;
+  /** Present only for the trusted inbound command bridge. */
+  command?: PluginSessionActionCommandContext;
   payload?: PluginJsonValue;
   client?: {
     connId?: string;
@@ -147,6 +167,11 @@ export type PluginSessionActionRegistration = {
   description?: string;
   schema?: PluginJsonValue;
   requiredScopes?: OperatorScope[];
+  /**
+   * Exact built-in chat command names this bundled action may handle.
+   * These are an internal command bridge; external plugins cannot claim them.
+   */
+  commandNames?: string[];
   handler: (
     ctx: PluginSessionActionContext,
   ) => PluginSessionActionResult | void | Promise<PluginSessionActionResult | void>;

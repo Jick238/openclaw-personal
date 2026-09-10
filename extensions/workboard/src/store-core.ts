@@ -800,6 +800,7 @@ export class WorkboardCoreStore {
     for (const key of [
       "tenant",
       "boardId",
+      "requesterSessionKey",
       "createdByCardId",
       "idempotencyKey",
       "skills",

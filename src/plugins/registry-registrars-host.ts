@@ -539,15 +539,24 @@ export function createHostRegistrars(state: PluginRegistryState) {
     const id = normalizeHostHookString(action.id);
     const description = normalizeOptionalHostHookString(action.description);
     const requiredScopes = normalizeHostHookStringList(action.requiredScopes);
+    const commandNames = normalizeHostHookStringList(action.commandNames);
     if (
       !id ||
       description === "" ||
       requiredScopes === null ||
+      commandNames === null ||
       typeof action.handler !== "function"
     ) {
       reportRegistrationError(
         record,
         "session action registration requires id, handler, and valid optional fields",
+      );
+      return;
+    }
+    if (commandNames !== undefined && record.origin !== "bundled") {
+      reportRegistrationError(
+        record,
+        "session action commandNames are only available to bundled plugins",
       );
       return;
     }
@@ -581,7 +590,9 @@ export function createHostRegistrars(state: PluginRegistryState) {
         ...(requiredScopes !== undefined
           ? { requiredScopes: requiredScopes as OperatorScope[] }
           : {}),
+        ...(commandNames !== undefined ? { commandNames } : {}),
       },
+      origin: record.origin,
       source: record.source,
       rootDir: record.rootDir,
     } satisfies PluginSessionActionRegistryRegistration);

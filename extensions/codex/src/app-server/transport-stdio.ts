@@ -20,6 +20,15 @@ const RUNTIME_INJECTION_ENVIRONMENT_KEYS = new Set([
   "LD_PRELOAD",
 ]);
 const QA_PARENT_PID_ENV = "OPENCLAW_QA_PARENT_PID";
+const MANAGED_PROXY_ACTIVE_ENV = "OPENCLAW_PROXY_ACTIVE";
+const PROXY_ENV_KEYS = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+] as const;
 
 type CodexAppServerSpawnRuntime = {
   platform: NodeJS.Platform;
@@ -48,7 +57,12 @@ function resolveCodexAppServerSpawnInvocation(
     execPath: runtime.execPath,
     packageName: "@openai/codex",
   });
-  const args = normalizeCodexAppServerArgs(options.args);
+  const args = normalizeCodexAppServerArgs(
+    options.args,
+    runtime.env[MANAGED_PROXY_ACTIVE_ENV] === "1"
+      ? "features.respect_system_proxy=true"
+      : undefined,
+  );
   const resolved = materializeWindowsSpawnProgram(program, args);
   return {
     command: resolved.command,
@@ -87,7 +101,21 @@ export function resolveCodexAppServerSpawnEnv(
       delete env[key];
     }
   }
+  // A child must not opt out of the parent managed-proxy contract by clearing
+  // the marker in its per-process environment overrides.
+  if (baseEnv[MANAGED_PROXY_ACTIVE_ENV] === "1") {
+    env[MANAGED_PROXY_ACTIVE_ENV] = "1";
+  }
+  if (env[MANAGED_PROXY_ACTIVE_ENV] === "1" && !hasInheritedProxyRoute(env)) {
+    throw new Error(
+      "Codex app-server requires the active managed proxy, but no proxy route was inherited",
+    );
+  }
   return env;
+}
+
+function hasInheritedProxyRoute(env: NodeJS.ProcessEnv): boolean {
+  return PROXY_ENV_KEYS.some((key) => typeof env[key] === "string" && env[key]!.trim().length > 0);
 }
 
 function isCodexRuntimeInjectionEnvironmentKey(rawKey: string): boolean {

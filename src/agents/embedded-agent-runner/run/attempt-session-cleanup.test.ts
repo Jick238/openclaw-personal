@@ -97,6 +97,23 @@ describe("cleanupEmbeddedAttemptSessionPhase", () => {
     expect(input.emitDiagnosticRunCompleted).toHaveBeenCalledWith("completed", null, undefined);
   });
 
+  it("defers trajectory flushing while completing critical session cleanup", async () => {
+    const deferredLifecycleOwner = {
+      recordSessionEnd: vi.fn(),
+      complete: vi.fn(),
+      discard: vi.fn(),
+    };
+    const input = createInput({ deferredLifecycleOwner });
+
+    await cleanupEmbeddedAttemptSessionPhase(input as never);
+
+    expect(deferredLifecycleOwner.recordSessionEnd).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "cleanup", aborted: false }),
+    );
+    expect(hoisted.flushEmbeddedAttemptTrajectoryRecorder).not.toHaveBeenCalled();
+    expect(hoisted.cleanupEmbeddedAttemptResources).toHaveBeenCalledOnce();
+  });
+
   it("keeps compaction timeout observations abort-like only for cleanup", async () => {
     const input = createInput();
     const readState = input.readState;

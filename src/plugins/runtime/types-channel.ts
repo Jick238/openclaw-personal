@@ -17,6 +17,7 @@ import type {
   MatchesMentionWithExplicit,
 } from "../../auto-reply/reply/mentions.types.js";
 import type { CreateReplyDispatcherWithTyping } from "../../auto-reply/reply/reply-dispatcher.runtime-types.js";
+import type { ChannelExternalTurnRunner } from "../../channels/plugins/channel-runtime-surface.types.js";
 import type { LoadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.types.js";
 import type { ResolveMarkdownTableMode } from "../../config/markdown-tables.types.js";
 import type {
@@ -206,4 +207,8 @@ export type PluginRuntimeChannel = {
     }) => RuntimeThreadBindingLifecycleRecord[];
   };
   runtimeContexts: PluginRuntimeChannelContextRegistry;
+  externalTurns?: {
+    runResultOnly: ChannelExternalTurnRunner;
+    commitTask?: import("../../channels/plugins/channel-runtime-surface.types.js").ChannelExternalTaskCommitter;
+  };
 };

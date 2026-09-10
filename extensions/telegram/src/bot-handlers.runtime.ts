@@ -6,6 +6,7 @@ import {
   registerTelegramInboundHandlers,
 } from "./bot-handlers.inbound-pipeline.js";
 import { createTelegramMessagePipeline } from "./bot-handlers.message-pipeline.js";
+import { registerTelegramGuestHandler } from "./bot-handlers.guest.js";
 import type { RegisterTelegramHandlerParams } from "./bot-handlers.types.js";
 
 export const registerTelegramHandlers = (params: RegisterTelegramHandlerParams) => {
@@ -20,6 +21,8 @@ export const registerTelegramHandlers = (params: RegisterTelegramHandlerParams) 
     registerMessages: () =>
       registerTelegramInboundHandlers({ bot: params.bot, pipeline: inboundPipeline }),
   });
+
+  registerTelegramGuestHandler(params, message);
 
   eventBindings.registerChatMembership();
   eventBindings.registerReaction();

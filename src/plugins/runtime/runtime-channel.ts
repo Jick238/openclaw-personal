@@ -82,6 +82,7 @@ import type { PluginRuntime } from "./types.js";
 
 export function createRuntimeChannel(options?: {
   dispatchReplyFromConfig?: PluginRuntime["channel"]["reply"]["dispatchReplyFromConfig"];
+  externalTurns?: PluginRuntime["channel"]["externalTurns"];
 }): PluginRuntime["channel"] {
   const dispatchInbound: typeof dispatchRoutedChannelTurn = (params) =>
     dispatchRoutedChannelTurn({
@@ -218,6 +219,7 @@ export function createRuntimeChannel(options?: {
         }),
     },
     runtimeContexts: createChannelRuntimeContextRegistry(),
+    ...(options?.externalTurns ? { externalTurns: options.externalTurns } : {}),
   } satisfies PluginRuntime["channel"];
 
   return channelRuntime as PluginRuntime["channel"];

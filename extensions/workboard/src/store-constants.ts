@@ -49,9 +49,19 @@ export function workboardCardSlotOwner(card: WorkboardCard, now?: number): strin
   const claim = card.metadata?.claim;
   // Ready candidates pass now to ignore expired claims. Occupied slots omit it
   // so the claim owner keeps its slot through the heartbeat-reclaim grace period.
+  const orchestrationPlacement = card.metadata?.automation?.createdByCardId;
+  // Requester-bound parent cards are independent admitted tasks; key their
+  // capacity slot by card while retaining the claim owner for authority.
+  const requesterBoundParent = card.metadata?.automation?.requesterSessionKey;
+  const placementOwner =
+    (orchestrationPlacement || requesterBoundParent) && card.agentId
+      ? `${card.agentId}:${card.id}`
+      : undefined;
+  const claimOwner = claim?.ownerId;
   return (
+    placementOwner ||
     (claim && (now === undefined || isFutureDateTimestampMs(claim.expiresAt, { nowMs: now }))
-      ? claim.ownerId
+      ? claimOwner
       : undefined) ||
     card.agentId ||
     DEFAULT_WORKBOARD_DISPATCH_OWNER

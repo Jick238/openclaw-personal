@@ -45,7 +45,7 @@ function createRuntime(
   const port: RuntimePort = {
     postMessage(message) {
       messages.push(message);
-      if (message.type === "update") {
+      if (message.type === "update" || message.type === "fast-path") {
         sendCommand({
           type: "spool-ack",
           requestId: message.requestId,
@@ -99,6 +99,42 @@ afterEach(() => {
 });
 
 describe("telegram ingress worker poll cadence", () => {
+  it("routes guest messages outside the durable spool", async () => {
+    vi.useFakeTimers();
+    const runtime = createRuntime([
+      jsonResponse(200, {
+        ok: true,
+        result: [{ update_id: 43, guest_message: { guest_query_id: "query-43" } }],
+      }),
+    ]);
+
+    await flushRuntime();
+    await runtime.done;
+
+    expect(runtime.messages).toContainEqual(
+      expect.objectContaining({ type: "fast-path", update: expect.objectContaining({ update_id: 43 }) }),
+    );
+    expect(runtime.messages.filter((message) => message.type === "update")).toHaveLength(0);
+  });
+
+  it("keeps callback queries on the durable spool path", async () => {
+    vi.useFakeTimers();
+    const runtime = createRuntime([
+      jsonResponse(200, {
+        ok: true,
+        result: [{ update_id: 44, callback_query: { id: "callback-44" } }],
+      }),
+    ]);
+
+    await flushRuntime();
+    await runtime.done;
+
+    expect(runtime.messages).toContainEqual(
+      expect.objectContaining({ type: "update", update: expect.objectContaining({ update_id: 44 }) }),
+    );
+    expect(runtime.messages.filter((message) => message.type === "fast-path")).toHaveLength(0);
+  });
+
   it("confirms polling connectivity before entering the first long poll", async () => {
     vi.useFakeTimers();
     const runtime = createRuntime(

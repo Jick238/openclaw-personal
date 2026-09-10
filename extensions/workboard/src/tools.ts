@@ -9,6 +9,7 @@ import type {
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { Type } from "typebox";
 import { redactClaimToken } from "./card-redaction.js";
+import { createFrontAdmissionTool } from "./front-admission.js";
 import { WorkboardStore } from "./store.js";
 import {
   cardIdField,
@@ -203,6 +204,7 @@ export function createWorkboardTools(params: {
   const runClaimedCardMutation = (rawParams: unknown, mutate: WorkboardCardMutation) =>
     runCardMutation(rawParams, readClaimedCardToolParams, mutate);
   return [
+    createFrontAdmissionTool({ api: params.api, context: params.context, store }),
     {
       name: "workboard_list",
       label: "Workboard List",

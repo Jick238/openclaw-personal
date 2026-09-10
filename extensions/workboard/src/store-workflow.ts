@@ -247,15 +247,30 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     const now = Date.now();
     const createdCardIds = normalizeStringList(input.createdCardIds, "created card ids", 120);
     const childIds = cardChildIds(existing);
-    for (const createdCardId of createdCardIds) {
+    const recordedCreatedCardIds = new Set(existing.metadata?.automation?.createdCardIds ?? []);
+    const manifestIds = new Set([
+      ...childIds,
+      ...recordedCreatedCardIds,
+      ...createdCardIds,
+    ]);
+    for (const createdCardId of manifestIds) {
       const createdCard = await this.get(createdCardId);
       if (!createdCard) {
         throw new Error(`created card not found: ${createdCardId}`);
       }
       const linkedFromParent =
-        childIds.includes(createdCardId) && cardParentIds(createdCard).includes(existing.id);
+        (childIds.includes(createdCardId) && cardParentIds(createdCard).includes(existing.id)) ||
+        (recordedCreatedCardIds.has(createdCardId) &&
+          createdCard.metadata?.automation?.createdByCardId === existing.id);
       if (!linkedFromParent) {
         throw new Error(`created card is not linked to this card: ${createdCardId}`);
+      }
+      const blockedHasReason =
+        createdCard.status === "blocked" &&
+        (createdCard.metadata?.comments?.length ?? 0) > 0;
+      if (existing.metadata?.automation?.requesterSessionKey &&
+          createdCard.status !== "done" && !blockedHasReason) {
+        throw new Error(`created card is not terminal: ${createdCardId}`);
       }
     }
     const summary = normalizeBoundedString(input.summary, undefined, 2000, "summary");
@@ -375,7 +390,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     id: string,
     input: WorkboardBlockInput = {},
     scope: WorkboardMutationScope | null | undefined = input,
-    options: { clearExecutionAssociation?: boolean } = {},
+    options: { clearExecutionAssociation?: boolean; expectedUpdatedAt?: number } = {},
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
       const existing = await this.get(id);
@@ -387,7 +402,9 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       const reason =
         normalizeBoundedString(input.reason, undefined, 2000, "block reason") ??
         "Workboard card blocked.";
-      return await this.updateCard(id, this.buildBlockedCardPatch(existing, reason, now, options));
+      return await this.updateCard(id, this.buildBlockedCardPatch(existing, reason, now, options), {
+        expectedUpdatedAt: options.expectedUpdatedAt,
+      });
     });
   }
 
@@ -564,6 +581,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
             throw new Error("at most 20 children can be created at once.");
           }
           const parentAutomation = parent.metadata?.automation;
+          const independentChildren = input.independentChildren === true;
           const children: WorkboardCard[] = [];
           for (const rawChild of childrenInput) {
             if (!rawChild || typeof rawChild !== "object" || Array.isArray(rawChild)) {
@@ -573,7 +591,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
             const created = await this.createDirect(
               {
                 ...child,
-                parents: [parent.id],
+                ...(independentChildren ? {} : { parents: [parent.id] }),
                 boardId: child.boardId ?? parentAutomation?.boardId,
                 tenant: child.tenant ?? parentAutomation?.tenant,
                 createdByCardId: parent.id,
@@ -584,12 +602,14 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
               scope === null ? undefined : scope,
             );
             children.push(
-              cardParentIds(created).includes(parent.id)
+              independentChildren
                 ? created
-                : await this.linkCardsDirect(parent.id, created.id, Date.now(), {
-                    allowStatusOnlyActiveChild: true,
-                    scope: scope === null ? undefined : scope,
-                  }),
+                : cardParentIds(created).includes(parent.id)
+                  ? created
+                  : await this.linkCardsDirect(parent.id, created.id, Date.now(), {
+                      allowStatusOnlyActiveChild: true,
+                      scope: scope === null ? undefined : scope,
+                    }),
             );
           }
           const summary = normalizeBoundedString(

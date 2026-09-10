@@ -717,6 +717,21 @@ export async function buildTelegramInboundContextPayload(params: {
       })?.id,
       threadId: threadSpec.id != null ? String(threadSpec.id) : undefined,
     },
+    channelContext: {
+      sender: {
+        ...(senderId ? { id: senderId } : {}),
+        ...(senderUsername ? { username: senderUsername } : {}),
+      },
+      chat: {
+        id: String(chatId),
+        ...(threadSpec.id != null ? { threadId: String(threadSpec.id) } : {}),
+        ...(visibleReplyTarget?.id !== undefined
+          ? { replyToId: String(visibleReplyTarget.id) }
+          : {}),
+        ...(replyBody ? { replyToBody: replyBody } : {}),
+        ...(visibleReplyTarget?.sender ? { replyToSender: visibleReplyTarget.sender } : {}),
+      },
+    },
     route: {
       agentId: route.agentId,
       dmScope: route.dmScope,

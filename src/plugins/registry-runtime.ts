@@ -2,6 +2,7 @@ import { createHostChannelInboundEventContextBuilder } from "../channels/inbound
 import { registerChannelIngressHostOwner } from "../channels/message-access/ingress-host-owner.js";
 import { createChannelIngressDrain } from "../channels/message/ingress-drain.js";
 import { createChannelIngressQueue } from "../channels/message/ingress-queue.js";
+import type { ChannelExternalTaskCommitResult } from "../channels/plugins/channel-runtime-surface.types.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import {
   createPluginBlobStore,
@@ -150,6 +151,51 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
     const scoped = {
       ...channel,
       inbound: { ...channel.inbound, buildContext },
+      ...(channel.externalTurns
+        ? {
+            externalTurns: {
+              runResultOnly: (params: Parameters<typeof channel.externalTurns.runResultOnly>[0]) =>
+                resolvePluginRuntime(record.id).agent.runEmbeddedAgentForResult(params),
+              ...(channel.externalTurns.commitTask
+                ? {
+                    commitTask: async (
+                      params: Parameters<NonNullable<typeof channel.externalTurns.commitTask>>[0],
+                    ) => {
+                      try {
+                        return await resolvePluginRuntime(
+                          record.id,
+                        ).gateway.request<ChannelExternalTaskCommitResult>(
+                          "workboard.front.admit",
+                          {
+                            channel: params.channel,
+                            accountId: params.accountId,
+                            agentId: params.agentId,
+                            senderId: params.senderId,
+                            ...(params.senderUsername
+                              ? { senderUsername: params.senderUsername }
+                              : {}),
+                            sessionKey: params.sessionKey,
+                            prompt: params.prompt,
+                            correlationId: params.correlationId,
+                          },
+                        );
+                      } catch (error) {
+                        console.warn(
+                          "[plugin-registry] external task commit failed",
+                          error instanceof Error ? error.name : "unknown",
+                        );
+                        return {
+                          kind: "unavailable" as const,
+                          code: "failed" as const,
+                          reason: "failed" as const,
+                        };
+                      }
+                    },
+                  }
+                : {}),
+            },
+          }
+        : {}),
     } satisfies PluginRuntime["channel"];
     cache.set(record, scoped);
     return scoped;
@@ -173,7 +219,8 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
         | "openKeyedStore"
         | "openSyncKeyedStore"
         | "openChannelIngressQueue"
-        | "openChannelIngressDrain",
+        | "openChannelIngressDrain"
+        | "runEmbeddedAgentForResult",
     ) => {
       const record =
         pluginRuntimeRecordById.get(pluginId) ??
@@ -567,6 +614,16 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
               enumerable: true,
               value: runEmbeddedAgent,
             },
+            runEmbeddedAgentForResult: {
+              configurable: true,
+              enumerable: true,
+              value: async (
+                params: Parameters<PluginRuntime["agent"]["runEmbeddedAgentForResult"]>[0],
+              ) => {
+                assertTrustedPluginRuntime("runEmbeddedAgentForResult");
+                return await runWithPluginScope(() => agent.runEmbeddedAgentForResult(params));
+              },
+            },
             session: {
               configurable: true,
               enumerable: true,
@@ -581,6 +638,16 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
         }
         const subagent = getRuntimeProperty();
         return {
+          spawnVisible: async (params) => {
+            const { assertSessionIdentitiesOwned } = await loadSessionOwnership();
+            return await withPluginRuntimePluginIdScope(pluginId, async () => {
+              assertSessionIdentitiesOwned({
+                action: "spawn",
+                sessionKeys: [params.requesterSessionKey],
+              });
+              return await subagent.spawnVisible(params);
+            });
+          },
           run: async (params) => {
             const { assertSessionIdentitiesOwned } = await loadSessionOwnership();
             return await withPluginRuntimePluginIdScope(pluginId, async () => {
@@ -633,3 +700,5 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
 }
 
 export type PluginRuntimeResolver = ReturnType<typeof createPluginRuntimeResolver>;
+
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized resolver. */

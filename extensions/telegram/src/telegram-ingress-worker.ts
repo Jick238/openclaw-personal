@@ -36,6 +36,12 @@ export type TelegramIngressWorkerMessage =
       requestId: string;
       update: unknown;
       queued: number;
+    }
+  | {
+      type: "fast-path";
+      requestId: string;
+      update: unknown;
+      queued: number;
     };
 
 export type TelegramIngressWorkerCommand =
@@ -65,6 +71,7 @@ export type TelegramIngressWorkerOptions = {
   timeoutSeconds?: number;
   network?: TelegramNetworkConfig;
   proxy?: string;
+  requireProxy?: boolean;
 };
 
 type TelegramIngressWorkerHandle = {

@@ -1,6 +1,9 @@
 // Telegram plugin module implements polling session behavior.
 import { type RunOptions, run } from "@grammyjs/runner";
-import type { ChannelAccountSnapshot } from "openclaw/plugin-sdk/channel-contract";
+import type {
+  ChannelAccountSnapshot,
+  ChannelRuntimeSurface,
+} from "openclaw/plugin-sdk/channel-contract";
 import type { TelegramNetworkConfig } from "openclaw/plugin-sdk/config-contracts";
 import { drainPendingDeliveries } from "openclaw/plugin-sdk/delivery-queue-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -28,6 +31,7 @@ import {
   resolveTelegramIngressSpoolDir,
   resolveTelegramUpdateId,
 } from "./telegram-ingress-spool.js";
+import { markTelegramIngressReceived } from "./telegram-ingress-timing.js";
 import {
   createTelegramIngressWorker,
   type TelegramIngressWorkerFactory,
@@ -90,6 +94,7 @@ type TelegramPollingSessionOpts = {
   runtime: Parameters<typeof createTelegramBot>[0]["runtime"];
   buildContext?: Parameters<typeof createTelegramBot>[0]["buildContext"];
   dispatchReplyFromConfig?: Parameters<typeof createTelegramBot>[0]["dispatchReplyFromConfig"];
+  externalTurns?: ChannelRuntimeSurface["externalTurns"];
   proxyFetch: Parameters<typeof createTelegramBot>[0]["proxyFetch"];
   botInfo?: Parameters<typeof createTelegramBot>[0]["botInfo"];
   abortSignal?: AbortSignal;
@@ -111,6 +116,7 @@ type TelegramPollingSessionOpts = {
     timeoutSeconds?: number;
     proxy?: string;
     network?: TelegramNetworkConfig;
+    requireProxy?: boolean;
     spoolDir?: string;
     createWorker?: TelegramIngressWorkerFactory;
     drainIntervalMs?: number;
@@ -312,6 +318,7 @@ export class TelegramPollingSession {
         runtime: this.opts.runtime,
         buildContext: this.opts.buildContext,
         dispatchReplyFromConfig: this.opts.dispatchReplyFromConfig,
+        externalTurns: this.opts.externalTurns,
         proxyFetch: this.opts.proxyFetch,
         config: this.opts.config,
         accountId: this.opts.accountId,
@@ -441,6 +448,7 @@ export class TelegramPollingSession {
       timeoutSeconds: ingress.timeoutSeconds,
       network: ingress.network,
       proxy: ingress.proxy,
+      requireProxy: ingress.requireProxy === true,
     });
     let stopWorkerPromise: Promise<void> | undefined;
     const stopWorker = () => {
@@ -577,6 +585,43 @@ export class TelegramPollingSession {
           this.opts.log(`[telegram][diag] isolated polling offset queued updateId=${updateId}`);
           ackSpooledUpdate(message.requestId, { ok: true, updateId });
         })();
+        return;
+      }
+      if (message.type === "fast-path") {
+        markTelegramIngressReceived(message.update);
+        const updateId = resolveTelegramUpdateId(message.update);
+        const updateIdHint = updateId ?? "unknown";
+        this.opts.log(
+          `[telegram][diag] isolated polling fast-path update received updateId=${updateIdHint} queued=${message.queued}`,
+        );
+        if (updateId === null) {
+          ackSpooledUpdate(message.requestId, {
+            ok: false,
+            message: "Telegram fast-path update missing numeric update_id.",
+          });
+          return;
+        }
+        // Inline queries have a Telegram-side response deadline. They must not
+        // wait behind the durable message spool or its retry/adoption lifecycle.
+        // Advance polling immediately and let the bot answer on this fast path;
+        // a late answer is intentionally logged by the handler rather than
+        // replayed, because Telegram invalidates expired query ids.
+        const offsetPersistence = this.opts.persistUpdateId(updateId);
+        void Promise.resolve(offsetPersistence).catch((err: unknown) => {
+          if (!this.opts.abortSignal?.aborted) {
+            this.opts.log(
+                `[telegram] isolated polling fast-path offset persist failed updateId=${updateId}: ${formatErrorMessage(err)}`,
+            );
+          }
+        });
+        ackSpooledUpdate(message.requestId, { ok: true, updateId });
+        void bot.handleUpdate(message.update as never).catch((err: unknown) => {
+          if (!this.opts.abortSignal?.aborted) {
+            this.opts.log(
+              `[telegram] isolated polling fast-path failed updateId=${updateId}: ${formatErrorMessage(err)}`,
+            );
+          }
+        });
         return;
       }
       if (message.type === "spooled") {

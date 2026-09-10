@@ -182,6 +182,7 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
         buildContext: pluginChannelRuntime?.inbound.buildContext,
         // Forward the owning runtime's bound dispatcher into the turn plan; never invoked here.
         dispatchReplyFromConfig: pluginChannelRuntime?.reply?.dispatchReplyFromConfig,
+        externalTurns: pluginChannelRuntime?.externalTurns,
         fetch: proxyFetch,
         abortSignal: opts.abortSignal,
         publicUrl: opts.webhookUrl,
@@ -273,6 +274,7 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
       const createTelegramTransportForPolling = () =>
         resolveTelegramTransport(proxyFetch, {
           network: account.config.network,
+          requireProxy: cfg.proxy?.enabled === true,
         });
       const telegramTransport = createTelegramTransportForPolling();
 
@@ -285,6 +287,7 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
         buildContext: pluginChannelRuntime?.inbound.buildContext,
         // Forward the owning runtime's bound dispatcher into the turn plan; never invoked here.
         dispatchReplyFromConfig: pluginChannelRuntime?.reply?.dispatchReplyFromConfig,
+        externalTurns: pluginChannelRuntime?.externalTurns,
         proxyFetch,
         botInfo: opts.botInfo,
         abortSignal: opts.abortSignal,
@@ -301,6 +304,7 @@ export async function monitorTelegramProvider(opts: MonitorTelegramOpts = {}) {
           apiRoot: account.config.apiRoot,
           proxy: account.config.proxy,
           network: account.config.network,
+          requireProxy: cfg.proxy?.enabled === true,
         },
       });
       try {

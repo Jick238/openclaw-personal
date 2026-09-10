@@ -176,6 +176,29 @@ describe("WorkboardPage lifecycle", () => {
     );
   });
 
+  it("starts the first Workboard load after async plugin config arrives", async () => {
+    const workboard = createWorkboardCapability();
+    const context = contextWithWorkboard(workboard);
+    context.runtimeConfig.state.configSnapshot = null;
+    context.runtimeConfig.ensureLoaded = vi.fn(async () => {
+      context.runtimeConfig.state.configSnapshot = {
+        config: { plugins: { entries: { workboard: { enabled: true } } } },
+      } as never;
+    });
+    context.gateway.snapshot.phase = "connected";
+    context.gateway.snapshot.client = { request: vi.fn() } as never;
+    const page = document.createElement("openclaw-workboard-page") as WorkboardPageTestElement;
+    page.context = context;
+    document.body.append(page);
+    await page.updateComplete;
+    await Promise.resolve();
+    await page.updateComplete;
+
+    expect(loadBoard).toHaveBeenCalledWith(
+      expect.objectContaining({ host: workboard, client: context.gateway.snapshot.client }),
+    );
+  });
+
   it("tears down immediately when the Gateway disconnects", async () => {
     const workboard = createWorkboardCapability();
     const context = contextWithWorkboard(workboard);

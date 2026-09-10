@@ -24,6 +24,7 @@ export type TelegramProbe = BaseProbeResult & {
     canJoinGroups?: boolean | null;
     canReadAllGroupMessages?: boolean | null;
     canManageBots?: boolean | null;
+    supportsGuestQueries?: boolean | null;
     supportsInlineQueries?: boolean | null;
     canConnectToBusiness?: boolean | null;
     hasMainWebApp?: boolean | null;
@@ -40,6 +41,7 @@ export type TelegramProbeOptions = {
   accountId?: string;
   apiRoot?: string;
   includeWebhookInfo?: boolean;
+  requireProxy?: boolean;
   abortSignal?: AbortSignal;
 };
 
@@ -70,7 +72,11 @@ function buildProbeTransportCacheKey(token: string, options?: TelegramProbeOptio
     typeof autoSelectFamily === "boolean" ? String(autoSelectFamily) : "default";
   const dnsResultOrderKey = options?.network?.dnsResultOrder ?? "default";
   const apiRootKey = options?.apiRoot?.trim() ?? "";
-  return `${cacheIdentityKind}:${cacheIdentity}::${proxyKey}::${autoSelectFamilyKey}::${dnsResultOrderKey}::${apiRootKey}`;
+  const requireProxyKey =
+    options?.requireProxy === true || process.env["OPENCLAW_PROXY_ACTIVE"] === "1"
+      ? "required"
+      : "optional";
+  return `${cacheIdentityKind}:${cacheIdentity}::${proxyKey}::${autoSelectFamilyKey}::${dnsResultOrderKey}::${apiRootKey}::${requireProxyKey}`;
 }
 
 function setCachedProbeTransport(
@@ -100,6 +106,7 @@ function resolveProbeTransport(token: string, options?: TelegramProbeOptions): T
   const proxyFetch = proxyUrl ? makeProxyFetch(proxyUrl) : undefined;
   const transport = resolveTelegramTransport(proxyFetch, {
     network: options?.network,
+    ...(options?.requireProxy === true ? { requireProxy: true } : {}),
   });
 
   return setCachedProbeTransport(cacheKey, transport);
@@ -223,6 +230,7 @@ export async function probeTelegram(
         canJoinGroups: normalizeBoolean(bot.can_join_groups),
         canReadAllGroupMessages: normalizeBoolean(bot.can_read_all_group_messages),
         canManageBots: normalizeBoolean(bot.can_manage_bots),
+        supportsGuestQueries: normalizeBoolean(bot.supports_guest_queries),
         supportsInlineQueries: normalizeBoolean(bot.supports_inline_queries),
         canConnectToBusiness: normalizeBoolean(bot.can_connect_to_business),
         hasMainWebApp: normalizeBoolean(bot.has_main_web_app),

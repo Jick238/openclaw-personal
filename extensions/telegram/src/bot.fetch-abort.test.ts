@@ -209,6 +209,31 @@ describe("createTelegramBot fetch abort", () => {
     },
   );
 
+  it("aborts answerInlineQuery at its inline transport deadline", async () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<AbortSignal>((resolve) => {
+          const signal = init?.signal as AbortSignal;
+          signal.addEventListener("abort", () => resolve(signal), { once: true });
+        }),
+    );
+    const { clientFetch } = createWrappedTelegramClientFetch(fetchSpy as unknown as typeof fetch);
+
+    const observedSignalPromise = clientFetch(
+      "https://api.telegram.org/bot123456:ABC/answerInlineQuery",
+    );
+    await vi.advanceTimersByTimeAsync(9_000);
+    const observedSignal = (await observedSignalPromise) as AbortSignal;
+
+    expect(observedSignal).toBeInstanceOf(AbortSignal);
+    expect(observedSignal.aborted).toBe(true);
+    expect((observedSignal.reason as Error).message).toBe(
+      "Telegram answerinlinequery timed out after 9000ms",
+    );
+    vi.useRealTimers();
+  });
+
   it("lets configured timeoutSeconds extend outbound method guards", async () => {
     vi.useFakeTimers();
     const fetchSpy = vi.fn(

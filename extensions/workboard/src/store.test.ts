@@ -16,6 +16,7 @@ import type {
   WorkboardKeyedStore,
 } from "./persistence-types.js";
 import { createWorkboardSqliteStores } from "./sqlite-store.js";
+import { cardParentIds } from "./store-card-helpers.js";
 import { normalizeExecution } from "./store-normalizers.js";
 import { WorkboardCardConflictError, WorkboardStore } from "./store.js";
 
@@ -2875,6 +2876,24 @@ describe("WorkboardStore", () => {
     expect(blocked.metadata?.notifications?.[0]?.message.length).toBeLessThanOrEqual(240);
   });
 
+  it("rejects a stop CAS when a replacement mutation is already queued", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const card = await store.create({ title: "Running task", status: "running" });
+    const expectedUpdatedAt = card.updatedAt;
+    const replacement = store.update(card.id, { title: "Replacement execution" });
+    const stop = store.block(card.id, { reason: "Stop stale execution." }, null, {
+      clearExecutionAssociation: true,
+      expectedUpdatedAt,
+    });
+
+    await replacement;
+    await expect(stop).rejects.toBeInstanceOf(WorkboardCardConflictError);
+    await expect(store.get(card.id)).resolves.toMatchObject({
+      title: "Replacement execution",
+      status: "running",
+    });
+  });
+
   it("heals oversized persisted notifications and keeps dispatching sibling cards", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-workboard-notification-"));
     const dbPath = path.join(dir, "workboard.sqlite");
@@ -3614,6 +3633,28 @@ describe("WorkboardStore", () => {
       status: "done",
       metadata: { automation: { createdCardIds: [child.id] } },
     });
+  });
+
+  it("keeps the persisted Hicks child manifest authoritative", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const parent = await store.create({
+      title: "Hicks parent",
+      status: "running",
+      metadata: { automation: { requesterSessionKey: "agent:main:telegram:direct:1" } },
+    });
+    const result = await store.decompose(
+      parent.id,
+      {
+        completeParent: false,
+        independentChildren: true,
+        children: [{ title: "lane-a", agentId: "luna" }, { title: "lane-b", agentId: "luna" }],
+      },
+      null,
+    );
+    await expect(store.complete(parent.id, {}, null)).rejects.toThrow(/created card is not terminal/);
+    await expect(
+      store.complete(parent.id, { createdCardIds: [result.children[0]!.id] }, null),
+    ).rejects.toThrow(/created card is not terminal/);
   });
 
   it("promotes, reassigns, and reclaims cards for operator recovery", async () => {
@@ -4749,6 +4790,60 @@ describe("WorkboardStore", () => {
       expect.objectContaining({ message: expect.stringMatching(/claimed by/) }),
       expect.objectContaining({ message: "card compensation failed" }),
     ]);
+  });
+
+  it("fans out runnable independent children while the orchestrator parent stays open", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const parent = await store.create({ title: "Parallel acceptance", status: "ready" });
+    const parentClaim = await store.claim(parent.id, { ownerId: "hicks-orchestrator" });
+    const result = await store.decompose(
+      parent.id,
+      {
+        completeParent: false,
+        independentChildren: true,
+        children: [
+          { title: "Luna 1", agentId: "luna" },
+          { title: "Luna 2", agentId: "luna" },
+          { title: "Luna 3", agentId: "luna" },
+        ],
+      },
+      { ownerId: "hicks-orchestrator", token: parentClaim.token },
+    );
+
+    expect(result.children).toHaveLength(3);
+    expect(result.children.every((child) => cardParentIds(child).length === 0)).toBe(true);
+    expect(
+      result.children.every((child) => child.metadata?.automation?.createdByCardId === parent.id),
+    ).toBe(true);
+    const childClaims = await Promise.all(
+      result.children.map((child, index) =>
+        store.claim(child.id, { ownerId: `luna-${index + 1}` }),
+      ),
+    );
+    expect(childClaims.every(({ card }) => card.status === "running")).toBe(true);
+    await Promise.all(
+      childClaims.map(({ card, token }, index) =>
+        store.complete(
+          card.id,
+          {
+            summary: `LUNA_ACCEPT_${index + 1}`,
+            proof: {
+              status: "passed",
+              label: "terminal",
+              command: "printf acceptance",
+            },
+          },
+          { ownerId: `luna-${index + 1}`, token },
+        ),
+      ),
+    );
+    await expect(
+      store.complete(
+        parent.id,
+        { createdCardIds: result.children.map((child) => child.id), summary: "All lanes passed." },
+        { ownerId: "hicks-orchestrator", token: parentClaim.token },
+      ),
+    ).resolves.toMatchObject({ status: "done" });
   });
 
   it("preserves parent child links when decomposition leaves the parent open", async () => {

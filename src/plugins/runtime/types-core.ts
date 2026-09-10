@@ -7,6 +7,10 @@ import type { HeartbeatRunResult } from "../../infra/heartbeat-wake.js";
 import type { LogLevel } from "../../logging/levels.js";
 import type { MediaUnderstandingRuntime } from "../../media-understanding/runtime-types.js";
 import type { PluginRuntimeTaskFlows, PluginRuntimeTaskRuns } from "./runtime-tasks.types.js";
+import type {
+  ChannelExternalTurnRequest,
+  ChannelExternalTurnResult,
+} from "../../channels/plugins/channel-runtime-surface.types.js";
 
 type TtsRuntimeApi = typeof import("../../tts/runtime-api.js");
 type ListSpeechVoices = TtsRuntimeApi["listSpeechVoices"];
@@ -311,6 +315,9 @@ type RuntimeRunEmbeddedAgentParams = Omit<
 type RuntimeRunEmbeddedAgent = (
   params: RuntimeRunEmbeddedAgentParams,
 ) => Promise<import("../../agents/embedded-agent-runner/types.js").EmbeddedAgentRunResult>;
+type RuntimeRunEmbeddedAgentForResult = (
+  request: ChannelExternalTurnRequest,
+) => Promise<ChannelExternalTurnResult>;
 
 /** Core runtime helpers exposed to trusted native plugins. */
 export type PluginRuntimeCore = {
@@ -361,6 +368,7 @@ export type PluginRuntimeCore = {
       runtime: import("../../runtime.js").RuntimeEnv,
     ) => ReturnType<typeof import("../../agents/agent-command.js").agentCommandFromIngress>;
     runEmbeddedAgent: RuntimeRunEmbeddedAgent;
+    runEmbeddedAgentForResult: RuntimeRunEmbeddedAgentForResult;
     resolveAgentTimeoutMs: typeof import("../../agents/timeout.js").resolveAgentTimeoutMs;
     /**
      * Shares the embedded runner's CLI-backend dispatch eligibility (route,

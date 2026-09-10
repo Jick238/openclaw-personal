@@ -292,6 +292,7 @@ export const dispatchTelegramMessage = async (
     telegramDeps: injectedTelegramDeps,
     retryDispatchErrors = false,
     suppressFailureFallback = false,
+    responseTarget,
     turnAdoptionLifecycle,
   } = dispatchParams;
   const dispatchStartedAt = Date.now();
@@ -324,7 +325,7 @@ export const dispatchTelegramMessage = async (
   const isDispatchSuperseded = () => turnAdoptionLifecycle?.abortSignal?.aborted === true;
   const turnConfig = {
     ...dispatchParams,
-    allowProviderPreview,
+    allowProviderPreview: responseTarget ? false : allowProviderPreview,
     chunkMode: resolveChunkMode(cfg, "telegram", dispatchContext.route.accountId),
     context: dispatchContext,
     dispatchStartedAt,
@@ -338,7 +339,8 @@ export const dispatchTelegramMessage = async (
     replyQuotePosition: quote.replyQuotePosition,
     replyQuoteText: quote.replyQuoteText,
     resolvedReasoningLevel,
-    statusReactionController: status.controller,
+    statusReactionController: responseTarget ? undefined : status.controller,
+    streamMode: responseTarget ? "off" : dispatchParams.streamMode,
     tableMode,
     telegramDeps,
   };
@@ -390,7 +392,7 @@ export const dispatchTelegramMessage = async (
     if (isDispatchSuperseded()) {
       return { kind: "completed" };
     }
-    if (status.controller && !isRoomEvent) {
+    if (!responseTarget && status.controller && !isRoomEvent) {
       void status.controller.setThinking();
     }
     try {
@@ -418,7 +420,7 @@ export const dispatchTelegramMessage = async (
     return { kind: "completed" };
   }
   if (dispatchWasSuperseded) {
-    if (status.controller) {
+    if (!responseTarget && status.controller) {
       status.finalizeInBackground({ outcome: "done" }, "finalize");
     }
     return { kind: "completed" };
@@ -486,7 +488,7 @@ export const dispatchTelegramMessage = async (
         )
       : null);
 
-  if (status.controller && !hasVisibleResponse) {
+  if (!responseTarget && status.controller && !hasVisibleResponse) {
     status.finalizeInBackground({ outcome: "error" }, "error finalize");
   }
   const shouldReturnRetryableDispatchFailure =
@@ -500,14 +502,16 @@ export const dispatchTelegramMessage = async (
     return { kind: "completed" };
   }
 
-  scheduleDmTopicLabel({
-    bot,
-    cfg,
-    context: dispatchContext,
-    isFirstTurnInSession,
-    telegramCfg,
-  });
-  if (status.controller) {
+  if (!responseTarget) {
+    scheduleDmTopicLabel({
+      bot,
+      cfg,
+      context: dispatchContext,
+      isFirstTurnInSession,
+      telegramCfg,
+    });
+  }
+  if (!responseTarget && status.controller) {
     status.finalizeInBackground(
       {
         outcome:

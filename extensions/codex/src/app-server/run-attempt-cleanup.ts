@@ -78,7 +78,9 @@ export async function cleanupCodexAttempt(
         aborted: runAbortController.signal.aborted && !state.clientClosedAbort,
       });
     }
-    await runCleanupStep("codex-trajectory-flush", () => trajectoryRecorder?.flush());
+    if (!params.deferTerminalLifecycle) {
+      await runCleanupStep("codex-trajectory-flush", () => trajectoryRecorder?.flush());
+    }
     const retainLiveIncognitoThread =
       terminalState.turnSucceeded && isIncognitoSessionKey(params.sessionKey);
     // Native-preserved and supervision threads have separate ownership and can

@@ -182,7 +182,17 @@ class WorkboardPage extends OpenClawLightDomElement {
       return;
     }
     if (!context.runtimeConfig.state.configSnapshot && !context.runtimeConfig.state.configLoading) {
-      void context.runtimeConfig.ensureLoaded();
+      // The first render can observe a connected Gateway before config arrives. Kick a
+      // render after that single authoritative load so plugin activation can start the
+      // Workboard request; otherwise the page can remain on its empty pre-load state.
+      void context.runtimeConfig.ensureLoaded().then(
+        () => {
+          if (this.context === context) {
+            this.requestUpdate();
+          }
+        },
+        () => undefined,
+      );
     }
     if (!context.agents.state.agentsList && !context.agents.state.agentsLoading) {
       void context.agents.ensureList();

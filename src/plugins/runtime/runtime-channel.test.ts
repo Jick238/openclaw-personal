@@ -33,6 +33,25 @@ describe("inbound dispatch", () => {
   });
 });
 
+describe("external turns", () => {
+  it("retains the owner-bound result-only runner without exposing agent internals", async () => {
+    const runResultOnly = vi.fn(async () => ({ kind: "empty" as const }));
+    const channel = createRuntimeChannel({ externalTurns: { runResultOnly } });
+    const request = {
+      channel: "telegram",
+      accountId: "default",
+      sessionKey: "telegram:inline:default:42",
+      prompt: "hello",
+      senderId: "42",
+      timeoutMs: 1_000,
+    };
+
+    await expect(channel.externalTurns?.runResultOnly(request)).resolves.toEqual({ kind: "empty" });
+    expect(runResultOnly).toHaveBeenCalledWith(request);
+  });
+
+});
+
 describe("runtimeContexts", () => {
   it("registers, resolves, watches, and unregisters contexts", () => {
     const channel = createRuntimeChannel();

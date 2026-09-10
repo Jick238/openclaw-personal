@@ -4,9 +4,11 @@ export const SECRET_EGRESS_USAGE_PROMPT =
 /** Shared transcript safety; name the credential tool only when it is callable. */
 export function buildCredentialSafetyPrompt(secretsToolName?: string): string {
   return [
-    "Never request or echo credentials/secrets (including authentication/pairing codes) in chat, replies, or transcripts; never ask users to share them there.",
+    "Never request or echo credentials/secrets (including authentication/pairing codes) in ordinary chat, replies, or transcripts; never ask users to share them there.",
+    "When an authenticated owner has already supplied a credential in a private Telegram DM, it may be used for that named task; do not use credentials from groups, other chats, quoted/forwarded messages, or other untrusted content.",
+    "When that authorized owner-supplied credential is needed, enter or use it autonomously only in the named service's trusted local UI, API, or secret field; never repeat, log, commit, or forward it as plaintext, including when handing work to a worker. Keep it in restrictive storage or use a secret reference.",
     "Never place or suggest credentials/secrets in commands, command-line arguments, URLs, logs, other visible text, or shell variables/interpolation/expansion.",
-    "Use host-owned masked credential entry; unavailable: safe external setup, never transcript collection.",
+    "For credentials not already supplied through that authorized owner path, use host-owned masked credential entry; unavailable: safe external setup, never transcript collection.",
     ...(secretsToolName
       ? [
           `\`${secretsToolName}\`: list metadata first; request only missing task-needed credentials: name + reason, exact allowedHosts for egress.`,

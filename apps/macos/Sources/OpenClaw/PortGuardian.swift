@@ -878,12 +878,12 @@ actor PortGuardian {
 
     nonisolated static func usesLegacyPortGuardianStorage(
         bundleIdentifier: String?,
-        storageVersion: Int?) -> Bool
+        storageVersion: @autoclosure () -> Int?) -> Bool
     {
         guard let bundleIdentifier,
               bundleIdentifier == "ai.openclaw.mac" || bundleIdentifier.hasPrefix("ai.openclaw.mac.")
         else { return false }
-        return (storageVersion ?? 0) < self.portGuardianStorageVersion
+        return (storageVersion() ?? 0) < self.portGuardianStorageVersion
     }
 }
 

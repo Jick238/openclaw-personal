@@ -30,6 +30,9 @@ export function normalizeTelegramBotInfo(value: unknown): TelegramBotInfo | unde
     can_join_groups: normalizeBoolean(bot.can_join_groups) ?? false,
     can_read_all_group_messages: normalizeBoolean(bot.can_read_all_group_messages) ?? false,
     can_manage_bots: normalizeBoolean(bot.can_manage_bots) ?? false,
+    ...(typeof bot.supports_guest_queries === "boolean"
+      ? { supports_guest_queries: bot.supports_guest_queries }
+      : {}),
     supports_inline_queries: normalizeBoolean(bot.supports_inline_queries) ?? false,
     supports_join_request_queries: normalizeBoolean(bot.supports_join_request_queries) ?? false,
     can_connect_to_business: normalizeBoolean(bot.can_connect_to_business) ?? false,

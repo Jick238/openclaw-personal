@@ -205,6 +205,12 @@ export function createWorkboardOrchestrationTools(params: {
             description: "Complete the parent after child creation. Default true.",
           }),
         ),
+        independentChildren: Type.Optional(
+          Type.Boolean({
+            description:
+              "Create runnable children without parent dependencies for parallel fan-out. Default false.",
+          }),
+        ),
         children: Type.Array(
           strictObject({
             title: Type.String({ description: "Child title." }),

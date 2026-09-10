@@ -1,3 +1,4 @@
+// oxlint-disable max-lines -- Gateway runtime adapter intentionally owns the complete plugin bridge.
 // Gateway plugin runtime adapter.
 // Loads plugin registries and builds fallback request context for non-WS paths.
 import { randomUUID } from "node:crypto";
@@ -63,6 +64,7 @@ import {
   openGatewayNodeDuplex,
   projectGatewayRuntimeNodes,
 } from "./server-plugins-node-runtime.js";
+import { spawnVisiblePluginSubagent } from "./server-plugins-subagent-visible.js";
 
 export {
   dispatchGatewayMethodInProcess,
@@ -234,7 +236,6 @@ export async function dispatchTrustedPluginGatewayMethod<T>(
 }
 
 const PLUGIN_SUBAGENT_SESSION_MESSAGES_MAX_LIMIT = 1_000;
-
 export function createGatewaySubagentRuntime(
   resolveGatewayContext?: GatewayContextResolver,
   overridePolicies: PluginSubagentOverridePolicies = {},
@@ -265,6 +266,7 @@ export function createGatewaySubagentRuntime(
   };
 
   const subagentRuntime: PluginRuntime["subagent"] = {
+    spawnVisible: spawnVisiblePluginSubagent,
     async run(params) {
       if (params.disableTools === true && (params.toolsAlsoAllow?.length ?? 0) > 0) {
         throw new Error("Tool-free plugin subagent runs cannot request additive tools.");

@@ -132,6 +132,7 @@ export function createTelegramBotCore(
     opts.telegramTransport ??
     resolveTelegramTransport(opts.proxyFetch, {
       network: telegramCfg.network,
+      requireProxy: cfg.proxy?.enabled === true,
     });
   const finalFetch = createTelegramClientFetch({
     fetchImpl: asTelegramClientFetch(telegramTransport.fetch),

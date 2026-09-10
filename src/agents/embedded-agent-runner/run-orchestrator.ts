@@ -419,6 +419,7 @@ async function runEmbeddedAgentInternal(
               chatId: params.chatId,
               channelContext: params.channelContext,
             }),
+            ...(params.senderIsOwner !== undefined ? { senderIsOwner: params.senderIsOwner } : {}),
           };
           const hookResult = await runBeforeAgentReplyForTurn({
             runId: params.runId,

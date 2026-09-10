@@ -318,6 +318,8 @@ export type PluginHookAgentContext = {
   chatId?: string;
   /** Sender identity for channel-originated runs when available. */
   senderId?: string;
+  /** Host-resolved owner bit for channel-originated user turns. */
+  senderIsOwner?: boolean;
   trigger?: string;
   channelId?: string;
   /** Resolved effective context-token budget after model/config/agent caps. */

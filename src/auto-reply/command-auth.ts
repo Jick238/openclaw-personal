@@ -239,7 +239,8 @@ function resolveOwnerAllowFromList(
     const separatorIndex = trimmed.indexOf(":");
     if (separatorIndex > 0) {
       const prefix = trimmed.slice(0, separatorIndex);
-      const channel = normalizeAnyChannelId(prefix);
+      // Telegram's documented target prefix is also accepted in owner entries.
+      const channel = normalizeAnyChannelId(prefix.toLowerCase() === "tg" ? "telegram" : prefix);
       if (channel) {
         // Channel-prefixed entries require a known matching provider; webchat leaves it unset.
         if (!params.providerId || channel !== params.providerId) {

@@ -11,6 +11,7 @@ import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import type { TelegramBotDeps } from "./bot-deps.js";
 import type {
   TelegramMediaRef,
+  TelegramAlternateFinalResponseTarget,
   TelegramMessageContextOptions,
   TelegramPromptContextEntry,
 } from "./bot-message-context.types.js";
@@ -25,6 +26,7 @@ import type { TelegramTransport } from "./fetch.js";
 import type { TelegramReplyChainEntry } from "./message-cache.js";
 
 export type TelegramMessageProcessorTurnContext = {
+  responseTarget?: TelegramAlternateFinalResponseTarget;
   cfg: OpenClawConfig;
   telegramCfg: TelegramAccountConfig;
   onDispatchStart?: () => Promise<void> | void;

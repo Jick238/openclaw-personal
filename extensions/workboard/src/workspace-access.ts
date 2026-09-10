@@ -26,6 +26,7 @@ type PrepareSandboxWorkspaceAuthority =
   OpenClawPluginApi["runtime"]["sandbox"]["prepareWorkspaceAuthority"];
 
 export const WORKBOARD_TOOL_NAMES = [
+  "hicks_delegate",
   "workboard_list",
   "workboard_create",
   "workboard_link",

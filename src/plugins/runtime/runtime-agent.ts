@@ -648,9 +648,14 @@ export function createRuntimeAgent(): PluginRuntime["agent"] {
     ensureAgentWorkspace,
   } satisfies Omit<
     PluginRuntime["agent"],
-    "runCommandFromIngress" | "runEmbeddedAgent" | "session"
+    "runCommandFromIngress" | "runEmbeddedAgent" | "runEmbeddedAgentForResult" | "session"
   > &
-    Partial<Pick<PluginRuntime["agent"], "runCommandFromIngress" | "runEmbeddedAgent" | "session">>;
+    Partial<
+      Pick<
+        PluginRuntime["agent"],
+        "runCommandFromIngress" | "runEmbeddedAgent" | "runEmbeddedAgentForResult" | "session"
+      >
+    >;
 
   defineCachedValue(agentRuntime, "runCommandFromIngress", () =>
     createLazyRuntimeMethod(
@@ -673,6 +678,12 @@ export function createRuntimeAgent(): PluginRuntime["agent"] {
   );
   defineCachedValue(agentRuntime, "runEmbeddedAgent", () =>
     createLazyRuntimeMethod(loadEmbeddedAgentRuntime, (runtime) => runtime.runPluginEmbeddedAgent),
+  );
+  defineCachedValue(agentRuntime, "runEmbeddedAgentForResult", () =>
+    createLazyRuntimeMethod(
+      loadEmbeddedAgentRuntime,
+      (runtime) => runtime.runPluginEmbeddedAgentForResult,
+    ),
   );
   defineCachedValue(agentRuntime, "session", () => ({
     resolveStorePath: resolveSessionStorePathCore,

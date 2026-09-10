@@ -51,6 +51,26 @@ type SubagentRunResult = {
   };
 };
 
+type SubagentVisibleSpawnParams = {
+  task: string;
+  label: string;
+  agentId: string;
+  requesterSessionKey: string;
+  requesterOrigin: {
+    channel: string;
+    accountId?: string;
+    to: string;
+    threadId?: string | number;
+  };
+};
+
+type SubagentVisibleSpawnResult = {
+  status: string;
+  childSessionKey?: string;
+  runId?: string;
+  error?: string;
+};
+
 type SubagentWaitParams = {
   runId: string;
   timeoutMs?: number;
@@ -135,6 +155,8 @@ export type PluginRuntime = PluginRuntimeCore & {
   };
   subagent: {
     run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
+    /** Canonical visible spawn with native requester completion tracking. */
+    spawnVisible: (params: SubagentVisibleSpawnParams) => Promise<SubagentVisibleSpawnResult>;
     waitForRun: (params: SubagentWaitParams) => Promise<AgentWaitResult>;
     getSessionMessages: (
       params: SubagentGetSessionMessagesParams,

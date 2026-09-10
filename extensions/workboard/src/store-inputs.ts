@@ -25,6 +25,7 @@ type WorkboardCardInput = {
   position?: unknown;
   tenant?: unknown;
   boardId?: unknown;
+  requesterSessionKey?: unknown;
   createdByCardId?: unknown;
   idempotencyKey?: unknown;
   skills?: unknown;
@@ -173,6 +174,7 @@ export type WorkboardDecomposeInput = {
   summary?: unknown;
   children?: unknown;
   completeParent?: unknown;
+  independentChildren?: unknown;
 };
 export type WorkboardNotificationSubscribeInput = {
   boardId?: unknown;

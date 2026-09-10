@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "agentId": "main",
+  "profile": "full",
+  "allow": ["hicks_delegate", "sessions_yield"],
+  "deny": ["sessions_spawn", "agents_list"]
+}

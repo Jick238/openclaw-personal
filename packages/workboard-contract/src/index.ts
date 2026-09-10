@@ -273,6 +273,8 @@ export type WorkboardLaunchState =
 export type WorkboardAutomation = {
   tenant?: string;
   boardId?: string;
+  /** Stable Front session binding used for owner control of admitted work. */
+  requesterSessionKey?: string;
   createdByCardId?: string;
   idempotencyKey?: string;
   skills?: string[];

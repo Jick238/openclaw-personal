@@ -265,6 +265,18 @@ describe("probeTelegram retry logic", () => {
     });
   });
 
+  it("propagates the required proxy policy to the probe transport", async () => {
+    const fetchMock = installFetchMock();
+    mockGetMeSuccess(fetchMock);
+
+    await probeTelegram(token, timeoutMs, { requireProxy: true, includeWebhookInfo: false });
+
+    expect(resolveTelegramTransport).toHaveBeenCalledWith(undefined, {
+      network: undefined,
+      requireProxy: true,
+    });
+  });
+
   it("reuses probe fetcher across repeated probes for the same account transport settings", async () => {
     const fetchMock = installFetchMock();
     mockGetMeSuccess(fetchMock);

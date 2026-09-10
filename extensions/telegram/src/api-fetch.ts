@@ -18,10 +18,14 @@ type TelegramGetChatResponse = {
 export function resolveTelegramChatLookupFetch(params?: {
   proxyUrl?: string;
   network?: TelegramNetworkConfig;
+  requireProxy?: boolean;
 }): typeof fetch {
   const proxyUrl = params?.proxyUrl?.trim();
   const proxyFetch = proxyUrl ? makeProxyFetch(proxyUrl) : undefined;
-  return resolveTelegramFetch(proxyFetch, { network: params?.network });
+  return resolveTelegramFetch(proxyFetch, {
+    network: params?.network,
+    ...(params?.requireProxy === true ? { requireProxy: true } : {}),
+  });
 }
 
 export async function lookupTelegramChatId(params: {
@@ -31,11 +35,15 @@ export async function lookupTelegramChatId(params: {
   apiRoot?: string;
   proxyUrl?: string;
   network?: TelegramNetworkConfig;
+  requireProxy?: boolean;
   timeoutSeconds?: unknown;
 }): Promise<string | null> {
   const proxyUrl = params.proxyUrl?.trim();
   const proxyFetch = proxyUrl ? makeProxyFetch(proxyUrl) : undefined;
-  const transport = resolveTelegramTransport(proxyFetch, { network: params.network });
+  const transport = resolveTelegramTransport(proxyFetch, {
+    network: params.network,
+    ...(params.requireProxy === true ? { requireProxy: true } : {}),
+  });
   try {
     return await fetchTelegramChatId({
       token: params.token,

@@ -46,6 +46,7 @@ type InternalPluginLoadOverrides = {
 function createDeferredGatewaySubagentRuntime(runtime: PluginRuntime): PluginRuntime["subagent"] {
   return {
     run: (...args) => runtime.subagent.run(...args),
+    spawnVisible: (...args) => runtime.subagent.spawnVisible(...args),
     waitForRun: (...args) => runtime.subagent.waitForRun(...args),
     getSessionMessages: (...args) => runtime.subagent.getSessionMessages(...args),
     deleteSession: (...args) => runtime.subagent.deleteSession(...args),

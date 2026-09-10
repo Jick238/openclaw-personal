@@ -24,6 +24,66 @@ function createMemoryStore<T = PersistedWorkboardCard>(): WorkboardKeyedStore<T>
 }
 
 describe("workboard gateway methods", () => {
+  it("rejects Front admission unless Telegram supplies an owner-authorized plugin context", async () => {
+    const methods = new Map<string, Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1]>();
+    const api = {
+      registerGatewayMethod: vi.fn((method, handler) => methods.set(method, handler)),
+    } as unknown as OpenClawPluginApi;
+    registerWorkboardGatewayMethods({
+      api,
+      store: new WorkboardStore(createMemoryStore()),
+    });
+    const admit = methods.get("workboard.front.admit");
+    await expect(
+      admit?.({
+        params: {
+          channel: "telegram",
+          agentId: "main",
+          accountId: "default",
+          senderId: "123",
+          sessionKey: "agent:main:telegram:direct:123",
+          prompt: "forged",
+          correlationId: "forged-1",
+        },
+        client: { internal: { pluginRuntimeOwnerId: "untrusted-plugin" } },
+        context: { getRuntimeConfig: () => ({ commands: { ownerAllowFrom: ["telegram:123"] } }) },
+        respond: vi.fn(),
+      } as never),
+    ).rejects.toThrow(/agentId, sessionKey, prompt, and correlationId/);
+  });
+
+  it("does not turn wildcard Telegram DM access into owner authority", async () => {
+    const methods = new Map<string, Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1]>();
+    const api = {
+      registerGatewayMethod: vi.fn((method, handler) => methods.set(method, handler)),
+    } as unknown as OpenClawPluginApi;
+    registerWorkboardGatewayMethods({
+      api,
+      store: new WorkboardStore(createMemoryStore()),
+    });
+    await expect(
+      methods.get("workboard.front.admit")?.({
+        params: {
+          channel: "telegram",
+          agentId: "main",
+          accountId: "default",
+          senderId: "99",
+          sessionKey: "agent:main:telegram:direct:99",
+          prompt: "forged by allowed DM",
+          correlationId: "forged-wildcard-1",
+        },
+        client: { internal: { pluginRuntimeOwnerId: "telegram" } },
+        context: {
+          getRuntimeConfig: () => ({
+            channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
+            commands: { ownerAllowFrom: ["telegram:42"] },
+          }),
+        },
+        respond: vi.fn(),
+      } as never),
+    ).rejects.toThrow(/agentId, sessionKey, prompt, and correlationId/);
+  });
+
   it("registers CRUD methods with read/write scopes", async () => {
     type RegisteredMethod = {
       handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
@@ -47,6 +107,7 @@ describe("workboard gateway methods", () => {
     registerWorkboardGatewayMethods({ api, store });
 
     expect([...methods.keys()]).toEqual([
+      "workboard.front.admit",
       "workboard.cards.list",
       "workboard.cards.create",
       "workboard.cards.captureSession",

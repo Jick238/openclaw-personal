@@ -7,7 +7,9 @@ const DEFAULT_TELEGRAM_UPDATE_TYPES: ReadonlyArray<TelegramUpdateType> =
   API_CONSTANTS.DEFAULT_UPDATE_TYPES;
 
 export function resolveTelegramAllowedUpdates(): ReadonlyArray<TelegramUpdateType> {
-  const updates = [...DEFAULT_TELEGRAM_UPDATE_TYPES] as TelegramUpdateType[];
+  const updates = DEFAULT_TELEGRAM_UPDATE_TYPES.filter(
+    (update) => update !== "inline_query" && update !== "chosen_inline_result",
+  ) as TelegramUpdateType[];
   if (!updates.includes("message_reaction")) {
     updates.push("message_reaction");
   }

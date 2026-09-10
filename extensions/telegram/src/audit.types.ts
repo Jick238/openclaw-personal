@@ -25,6 +25,7 @@ export type AuditTelegramGroupMembershipParams = {
   groupIds: string[];
   proxyUrl?: string;
   network?: TelegramNetworkConfig;
+  requireProxy?: boolean;
   apiRoot?: string;
   timeoutMs: number;
 };

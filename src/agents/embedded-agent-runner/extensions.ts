@@ -107,8 +107,12 @@ function buildAgentToolResultMiddlewareFactory(
         isError: event.isError,
         result: current,
       });
+      // Hicks Front admission creates the same durable native child as
+      // sessions_spawn. Treat its typed accepted result as continuation
+      // evidence so sessions_yield arms the requester wake/rearm pipeline.
       const isAcceptedSessionSpawn =
-        event.toolName === "sessions_spawn" && normalizeAcceptedSessionSpawnResult(result) !== null;
+        (event.toolName === "sessions_spawn" || event.toolName === "hicks_delegate") &&
+        normalizeAcceptedSessionSpawnResult(result) !== null;
       const isError =
         !isAcceptedSessionSpawn &&
         (event.isError === true || inputHadErrorStatus || isToolResultError(result));

@@ -11,6 +11,7 @@ import {
   type TelegramIngressDrainLifecycle,
 } from "./telegram-ingress-drain.js";
 import { openTelegramIngressQueue } from "./telegram-ingress-spool.js";
+import { markTelegramIngressReceived } from "./telegram-ingress-timing.js";
 
 type TelegramSpooledBot = {
   handleUpdate: (update: never) => Promise<void>;
@@ -66,6 +67,7 @@ export function createTelegramTransportIngressMonitor(
       // grammY returns void, so carry its middleware-owned outcome back to durable ingress.
       // The spooled lifecycle remains on its existing frame for complete-at-adoption.
       const { result } = await runWithTelegramUpdateProcessingFrame(async () => {
+        markTelegramIngressReceived(update);
         await params.bot.handleUpdate(update as never);
       });
       return result;

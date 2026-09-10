@@ -26,6 +26,7 @@ import { handleLoopCommand } from "./commands-loop.js";
 import { handleMcpCommand } from "./commands-mcp.js";
 import { handleModelsCommand } from "./commands-models.js";
 import { handleNameCommand } from "./commands-name.js";
+import { handlePluginSessionActionCommand } from "./commands-plugin-session-action.js";
 import { handlePluginCommand } from "./commands-plugin.js";
 import { handlePluginsCommand } from "./commands-plugins.js";
 import {
@@ -47,6 +48,7 @@ import type { CommandHandler } from "./commands-types.js";
 import { handleWhoamiCommand } from "./commands-whoami.js";
 
 const commandHandlersById = {
+  "plugin-session-action": handlePluginSessionActionCommand,
   acp: handleAcpCommand,
   activation: handleActivationCommand,
   allowlist: handleAllowlistCommand,

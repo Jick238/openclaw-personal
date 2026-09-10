@@ -53,6 +53,7 @@
   "catalog": { "featured": true, "order": 10 },
   "contracts": {
     "tools": [
+      "hicks_delegate",
       "workboard_list",
       "workboard_create",
       "workboard_link",
@@ -92,6 +93,9 @@
   },
   "commandAliases": [{ "name": "workboard" }],
   "toolMetadata": {
+    "hicks_delegate": {
+      "optional": true
+    },
     "workboard_list": {
       "optional": true
     },

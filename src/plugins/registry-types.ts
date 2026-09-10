@@ -447,6 +447,7 @@ export type PluginSessionActionRegistryRegistration = {
   pluginId: string;
   pluginName?: string;
   action: PluginSessionActionRegistration;
+  origin?: PluginOrigin;
   source: string;
   rootDir?: string;
 };

@@ -227,6 +227,9 @@ export async function deliverReply(
   if (!normalizedPayload) {
     return await settleTerminalNoVisibleDelivery(turn, info);
   }
+  if (turn.responseTarget && info.kind !== "final") {
+    return await settleTerminalNoVisibleDelivery(turn, info);
+  }
   const deduped =
     info.kind === "final"
       ? deduplicateBlockSentMedia(normalizedPayload, turn.sentBlockMediaUrls)
@@ -236,6 +239,16 @@ export async function deliverReply(
   }
   const controls = resolvePayloadTelegramControls(turn, deduped);
   const effectivePayload = controls.payload;
+  if (info.kind === "final" && turn.responseTarget) {
+    const reply = resolveSendableOutboundReplyParts(effectivePayload);
+    if (reply.text.trim()) {
+      const accepted = await turn.responseTarget.deliver(reply.text);
+      if (accepted) markFinalDelivered(turn);
+      return { visibleReplySent: accepted };
+    }
+    await turn.responseTarget.deliver("No response was generated.");
+    return await settleTerminalNoVisibleDelivery(turn, info);
+  }
   if (
     shouldSuppressLocalTelegramExecApprovalPrompt({
       cfg: turn.cfg,

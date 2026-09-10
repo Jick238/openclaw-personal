@@ -170,6 +170,7 @@ function shouldUseTelegramClientOptionsCache(): boolean {
 
 function buildTelegramClientOptionsCacheKey(params: {
   account: ResolvedTelegramAccount;
+  requireProxy: boolean;
   timeoutSeconds?: number;
 }): string {
   const proxyKey = params.account.config.proxy?.trim() ?? "";
@@ -180,7 +181,8 @@ function buildTelegramClientOptionsCacheKey(params: {
   const apiRootKey = params.account.config.apiRoot?.trim() ?? "";
   const timeoutSecondsKey =
     typeof params.timeoutSeconds === "number" ? String(params.timeoutSeconds) : "default";
-  return `${params.account.accountId}::${proxyKey}::${autoSelectFamilyKey}::${dnsResultOrderKey}::${apiRootKey}::${timeoutSecondsKey}`;
+  const requireProxyKey = params.requireProxy ? "required" : "optional";
+  return `${params.account.accountId}::${proxyKey}::${autoSelectFamilyKey}::${dnsResultOrderKey}::${apiRootKey}::${timeoutSecondsKey}::${requireProxyKey}`;
 }
 
 function closeCachedTelegramClientOptions(entry: CachedTelegramClientOptions): void {
@@ -242,6 +244,7 @@ function setCachedTelegramClientOptions(
 
 function resolveTelegramClientOptions(
   account: ResolvedTelegramAccount,
+  requireProxy: boolean,
 ): ResolvedTelegramClientOptions {
   const timeoutSeconds = undefined;
 
@@ -249,6 +252,7 @@ function resolveTelegramClientOptions(
   const cacheKey = cacheEnabled
     ? buildTelegramClientOptionsCacheKey({
         account,
+        requireProxy,
         timeoutSeconds,
       })
     : null;
@@ -268,6 +272,7 @@ function resolveTelegramClientOptions(
   const normalizedApiRoot = apiRoot ? normalizeTelegramApiRoot(apiRoot) : undefined;
   const transport = resolveTelegramTransport(proxyFetch, {
     network: account.config.network,
+    ...(requireProxy ? { requireProxy: true } : {}),
   });
   const fetchImpl = createTelegramClientFetch({
     fetchImpl: asTelegramClientFetch(transport.fetch),
@@ -450,7 +455,7 @@ export function resolveTelegramApiContext(opts: {
   if (opts.api) {
     api = opts.api as TelegramApi;
   } else {
-    const client = resolveTelegramClientOptions(account);
+    const client = resolveTelegramClientOptions(account, cfg.proxy?.enabled === true);
     // One op-level lease covers the full send/action (including pre-request work
     // and retries) so eviction cannot close the transport mid-operation.
     clientOptionsLease = client.lease?.();

@@ -25,6 +25,19 @@ struct PortGuardianRecordStoreTests {
     }
 
     @Test
+    func `unrelated applications skip secured storage marker inspection`() {
+        var inspected = false
+
+        #expect(!PortGuardian.usesLegacyPortGuardianStorage(
+            bundleIdentifier: "com.example.unrelated",
+            storageVersion: {
+                inspected = true
+                return nil
+            }()))
+        #expect(!inspected)
+    }
+
+    @Test
     func `storage marker in app bundle matches runtime capability`() throws {
         let macOSRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
