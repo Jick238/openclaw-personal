@@ -25,6 +25,7 @@ sees through the dedicated QA user account.
 - [Basic turns](./basic-turns.md): real-user group, DM, and native-command entry points.
 - [Delivery lifecycle](./delivery-lifecycle.md): messages, edits, typing, and receipt finalization.
 - [Reaction lifecycle](./reaction-lifecycle.md): acknowledgement and status reactions on the user's message.
+- [Guest Mode](./guest-mode.md): a fail-closed guest query from Saved Messages with provider and `answerGuestQuery` proof.
 - Photo and album turns: pass `--photo PATH` to the canonical runner; repeat it for one Telegram media album and inspect `messagePhoto` events plus provider evidence.
 
 ## Other branches

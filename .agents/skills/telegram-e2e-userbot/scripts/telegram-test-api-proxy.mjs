@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from "node:crypto";
 import http from "node:http";
 import { Readable } from "node:stream";
 
@@ -16,6 +17,44 @@ const HOP_BY_HOP_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+const MAX_INSPECT_BODY_BYTES = 2 * 1024 * 1024;
+
+function guestQueryHash(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 24);
+}
+
+function parseJsonBody(body) {
+  if (!body || body.byteLength > MAX_INSPECT_BODY_BYTES) {
+    return undefined;
+  }
+  try {
+    const value = JSON.parse(body.toString("utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readRequestBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let bytes = 0;
+    request.on("data", (chunk) => {
+      bytes += chunk.length;
+      if (bytes <= MAX_INSPECT_BODY_BYTES) {
+        chunks.push(chunk);
+      }
+    });
+    request.once("end", () => {
+      if (bytes > MAX_INSPECT_BODY_BYTES) {
+        reject(new Error("Telegram API request body exceeded the inspection limit."));
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+    request.once("error", reject);
+  });
+}
 
 export function telegramTestApiPath(pathname) {
   const match = pathname.match(/^((?:\/file)?\/bot[^/]+)(\/.*)$/u);
@@ -53,7 +92,11 @@ async function drainTelegramTestUpdates(apiRoot, token) {
     const response = await fetch(`${apiRoot}/bot${token}/getUpdates`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ offset, timeout: 0, allowed_updates: ["message", "edited_message"] }),
+      body: JSON.stringify({
+        offset,
+        timeout: 0,
+        allowed_updates: ["message", "edited_message", "guest_message"],
+      }),
       signal: AbortSignal.timeout(15_000),
     });
     const payload = await response.json();
@@ -83,8 +126,16 @@ export async function startTelegramTestApiProxy({
   let leaseError;
   const upstreamControllers = new Set();
   const holdEvents = [];
+  const apiRequestEvents = [];
+  const guestIngressEvents = [];
   const methodOrdinals = new Map();
   const heldWaiters = new Set();
+
+  const nextMethodOrdinal = (method) => {
+    const ordinal = (methodOrdinals.get(method) ?? 0) + 1;
+    methodOrdinals.set(method, ordinal);
+    return ordinal;
+  };
 
   const assertLeaseHealthy = () => {
     if (leaseError) throw leaseError;
@@ -97,9 +148,7 @@ export async function startTelegramTestApiProxy({
     for (const controller of upstreamControllers) controller.abort(error);
   });
 
-  const claimResponseHold = (method) => {
-    const ordinal = (methodOrdinals.get(method) ?? 0) + 1;
-    methodOrdinals.set(method, ordinal);
+  const claimResponseHold = (method, ordinal) => {
     if (!responseHold || responseHold.method !== method) return undefined;
     if (responseHold.skip > 0) {
       responseHold.skip -= 1;
@@ -127,18 +176,60 @@ export async function startTelegramTestApiProxy({
       const upstreamUrl = new URL(upstream);
       upstreamUrl.pathname = telegramTestApiPath(incoming.pathname);
       upstreamUrl.search = incoming.search;
+      const method = telegramApiMethod(incoming.pathname);
+      const inspectRequest = method === "answerGuestQuery";
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
+      const requestBody = inspectRequest ? await readRequestBody(request) : undefined;
+      const requestPayload = parseJsonBody(requestBody);
       const result = await fetchImpl(upstreamUrl, {
         method: request.method,
         headers: requestHeaders(request.headers),
-        ...(hasBody ? { body: request, duplex: "half" } : {}),
+        ...(hasBody ? { body: requestBody ?? request, duplex: "half" } : {}),
         signal: upstreamController.signal,
       });
       assertLeaseHealthy();
-      const method = telegramApiMethod(incoming.pathname);
-      const hold = method ? claimResponseHold(method) : undefined;
+      const ordinal = method ? nextMethodOrdinal(method) : undefined;
+      const inspectResponse = method === "answerGuestQuery" || method === "getUpdates";
+      const responseBody =
+        inspectResponse && result.body ? Buffer.from(await result.arrayBuffer()) : undefined;
+      const responsePayload = parseJsonBody(responseBody);
+      if (method) {
+        const event = {
+          method,
+          ordinal,
+          status: result.status,
+          observedAt: Date.now(),
+          ...(typeof responsePayload?.ok === "boolean" ? { ok: responsePayload.ok } : {}),
+          ...(method === "answerGuestQuery" && typeof requestPayload?.guest_query_id === "string"
+            ? { guestQueryHash: guestQueryHash(requestPayload.guest_query_id) }
+            : {}),
+        };
+        apiRequestEvents.push(event);
+        if (
+          method === "getUpdates" &&
+          responsePayload?.ok === true &&
+          Array.isArray(responsePayload.result)
+        ) {
+          for (const [updateOrdinal, update] of responsePayload.result.entries()) {
+            const queryId = update?.guest_message?.guest_query_id;
+            if (typeof queryId !== "string" || !queryId) {
+              continue;
+            }
+            guestIngressEvents.push({
+              method,
+              ordinal,
+              updateOrdinal,
+              updateId: update?.update_id,
+              guestQueryHash: guestQueryHash(queryId),
+              observedAt: event.observedAt,
+            });
+          }
+        }
+      }
+      const hold = method ? claimResponseHold(method, ordinal) : undefined;
       if (hold) {
-        const body = result.body ? Buffer.from(await result.arrayBuffer()) : undefined;
+        const body =
+          responseBody ?? (result.body ? Buffer.from(await result.arrayBuffer()) : undefined);
         response.writeHead(result.status, responseHeaders(result.headers));
         response.write(" ");
         const heartbeat = setInterval(() => response.write(" "), 30_000);
@@ -163,6 +254,10 @@ export async function startTelegramTestApiProxy({
       response.writeHead(result.status, responseHeaders(result.headers));
       if (!result.body) {
         response.end();
+        return;
+      }
+      if (responseBody) {
+        response.end(responseBody);
         return;
       }
       await new Promise((resolve, reject) => {
@@ -241,6 +336,8 @@ export async function startTelegramTestApiProxy({
       return event;
     },
     getResponseHoldEvents: () => holdEvents.map((event) => ({ ...event })),
+    getApiRequestEvents: () => structuredClone(apiRequestEvents),
+    getGuestIngressEvents: () => structuredClone(guestIngressEvents),
     close: () => {
       heldResponse?.release.resolve();
       for (const controller of upstreamControllers) controller.abort();

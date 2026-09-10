@@ -9,6 +9,60 @@ import process from "node:process";
 import { assertCodexReleasePackageContract } from "./e2e/lib/codex-release-package-assertions.mjs";
 
 export const CODEX_SMOKE_MARKER = "HICKS_DEPLOY_SMOKE_OK";
+export const HICKS_ACCEPTANCE_SCHEMA = 2;
+export const HICKS_ACCEPTANCE_MAX_AGE_MS = 15 * 60 * 1_000;
+export const HICKS_ACCEPTANCE_CONTOURS = Object.freeze([
+  "guest",
+  "delegation-parallel",
+  "no-fake-progress",
+]);
+const HICKS_ACCEPTANCE_SPECS = Object.freeze({
+  guest: Object.freeze({
+    testFiles: ["extensions/telegram/src/bot-handlers.guest.test.ts"],
+    artifactFiles: [
+      "extensions/telegram/src/bot-handlers.guest.ts",
+      "extensions/telegram/src/bot-handlers.guest.test.ts",
+    ],
+  }),
+  "delegation-parallel": Object.freeze({
+    testFiles: [
+      "extensions/workboard/src/front-admission.test.ts",
+      "extensions/workboard/src/dispatcher.test.ts",
+    ],
+    artifactFiles: [
+      "extensions/workboard/src/front-admission.ts",
+      "extensions/workboard/src/dispatcher.ts",
+      "extensions/workboard/src/front-admission.test.ts",
+      "extensions/workboard/src/dispatcher.test.ts",
+    ],
+  }),
+  "no-fake-progress": Object.freeze({
+    testFiles: [
+      "extensions/workboard/src/dispatcher-ownership.test.ts",
+      "extensions/workboard/src/lifecycle-sync.test.ts",
+      "extensions/workboard/src/lifecycle-sync.restart.test.ts",
+    ],
+    artifactFiles: [
+      "extensions/workboard/src/dispatcher.ts",
+      "extensions/workboard/src/lifecycle-sync.ts",
+      "extensions/workboard/src/dispatcher-ownership.test.ts",
+      "extensions/workboard/src/lifecycle-sync.test.ts",
+      "extensions/workboard/src/lifecycle-sync.restart.test.ts",
+    ],
+  }),
+});
+const HICKS_BUILD_METADATA_FILES = [
+  "dist/build-info.json",
+  "dist/.buildstamp",
+  "dist/.runtime-postbuildstamp",
+  "dist/telegram-ingress-worker.runtime.js",
+];
+const HICKS_BUILD_COMMITS = [
+  ["dist/build-info.json", "commit", "buildInfoCommit"],
+  ["dist/.buildstamp", "head", "distBuildstampCommit"],
+  ["dist/.runtime-postbuildstamp", "head", "runtimePostbuildstampCommit"],
+];
+const FULL_COMMIT_RE = /^[a-f0-9]{40}$/u;
 const HICKS_REFERENCE_FILES = [
   ["OWNER_POLICY.md", "customization/hicks/OWNER_POLICY.md"],
   [
@@ -138,6 +192,17 @@ async function checked(execute, command, args, options, label) {
   return result;
 }
 
+async function resolveRepoCommit(execute, sourceRoot, env, timeoutMs) {
+  const result = await checked(
+    execute,
+    "git",
+    ["-C", sourceRoot, "rev-parse", "HEAD"],
+    { env, timeoutMs },
+    "Hicks repository identity",
+  );
+  return stampedCommit(result.stdout.trim(), "repository");
+}
+
 async function startAndVerifyService(execute, serviceName, options, label) {
   await checked(execute, "systemctl", ["start", serviceName], options, label);
   await checked(
@@ -158,6 +223,313 @@ async function sha256File(filePath) {
   const digest = crypto.createHash("sha256");
   digest.update(await fs.readFile(filePath));
   return digest.digest("hex");
+}
+
+async function buildArtifactPaths(root) {
+  const distRoot = path.join(root, "dist");
+  const entries = await fs.readdir(distRoot, { withFileTypes: true });
+  const telegramBundles = entries
+    .filter(
+      (entry) => entry.isFile() && /^telegram-ingress-drain-factory-.+\.js$/u.test(entry.name),
+    )
+    .map((entry) => path.join("dist", entry.name));
+  if (telegramBundles.length !== 1) {
+    throw new Error(
+      `Hicks build identity requires exactly one Telegram ingress bundle, found ${telegramBundles.length}`,
+    );
+  }
+  return [...HICKS_BUILD_METADATA_FILES, ...telegramBundles];
+}
+
+function stampedCommit(value, label) {
+  if (!FULL_COMMIT_RE.test(value ?? "")) {
+    throw new Error(`${label} does not contain a full Git commit SHA`);
+  }
+  return value;
+}
+
+async function readBuildIdentity(root, repoCommit) {
+  const artifacts = await acceptanceArtifacts(root, await buildArtifactPaths(root));
+  const stamped = Object.fromEntries(
+    await Promise.all(
+      HICKS_BUILD_COMMITS.map(async ([file, field, key]) => {
+        const commit = stampedCommit((await readJson(path.join(root, file)))[field], file);
+        if (commit !== repoCommit) {
+          throw new Error(`Hicks build identity mismatch: ${file}=${commit} repo=${repoCommit}`);
+        }
+        return [key, commit];
+      }),
+    ),
+  );
+  return { repoCommit, ...stamped, artifacts };
+}
+
+function sameBuildIdentity(expected, actual) {
+  return JSON.stringify(expected) === JSON.stringify(actual);
+}
+
+async function acceptanceArtifacts(sourceRoot, relativePaths) {
+  const artifacts = [];
+  for (const relativePath of relativePaths) {
+    const filePath = path.join(sourceRoot, relativePath);
+    let stats;
+    try {
+      stats = await fs.lstat(filePath);
+    } catch (error) {
+      throw new Error(`Hicks acceptance artifact is missing: ${relativePath}`, { cause: error });
+    }
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.size === 0) {
+      throw new Error(
+        `Hicks acceptance artifact must be a non-empty regular file: ${relativePath}`,
+      );
+    }
+    artifacts.push({
+      path: relativePath,
+      bytes: stats.size,
+      sha256: await sha256File(filePath),
+    });
+  }
+  return artifacts;
+}
+
+function validateTimestamp(timestampMs, label) {
+  if (!Number.isSafeInteger(timestampMs)) {
+    throw new Error(`${label} has no valid generation timestamp`);
+  }
+}
+
+function validateFreshTimestamp(timestampMs, nowMs, label) {
+  validateTimestamp(timestampMs, label);
+  const ageMs = nowMs - timestampMs;
+  if (ageMs < 0 || ageMs > HICKS_ACCEPTANCE_MAX_AGE_MS) {
+    throw new Error(`${label} is stale or from the future: ageMs=${ageMs}`);
+  }
+}
+
+function sameSorted(values, expected) {
+  return JSON.stringify([...values].toSorted()) === JSON.stringify([...expected].toSorted());
+}
+
+function requireAcceptance(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function exactContourMap(value, label) {
+  const expected = [...HICKS_ACCEPTANCE_CONTOURS].toSorted();
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !sameSorted(Object.keys(value), expected)
+  ) {
+    throw new Error(`${label} contours mismatch: expected ${expected.join(",")}`);
+  }
+  return value;
+}
+
+function validateSourceContour(contour, evidence, spec) {
+  const artifactProof =
+    Array.isArray(evidence?.artifacts) &&
+    sameSorted(
+      evidence.artifacts.map((artifact) => artifact?.path),
+      spec.artifactFiles,
+    ) &&
+    evidence.artifacts.every(
+      (artifact) =>
+        artifact &&
+        typeof artifact.path === "string" &&
+        Number.isSafeInteger(artifact.bytes) &&
+        artifact.bytes > 0 &&
+        typeof artifact.sha256 === "string" &&
+        /^[a-f0-9]{64}$/u.test(artifact.sha256),
+    );
+  requireAcceptance(
+    evidence?.status === "passed" &&
+      Array.isArray(evidence.testFiles) &&
+      sameSorted(evidence.testFiles, spec.testFiles),
+    `Hicks source gate has invalid test evidence: ${contour}`,
+  );
+  requireAcceptance(artifactProof, `Hicks source gate has invalid artifact proof: ${contour}`);
+  requireAcceptance(
+    typeof evidence.outputSha256 === "string" && /^[a-f0-9]{64}$/u.test(evidence.outputSha256),
+    `Hicks source gate has invalid test output proof: ${contour}`,
+  );
+}
+
+function validateSourceGates(sourceGates) {
+  if (
+    !sourceGates ||
+    sourceGates.runner !== "scripts/run-vitest.mjs" ||
+    sourceGates.networkBoundary !== "none"
+  ) {
+    throw new Error("Hicks source gates must use the local unit-test runner");
+  }
+  validateTimestamp(sourceGates.generatedAtMs, "Hicks source gates");
+  const contours = exactContourMap(sourceGates.contours, "Hicks source gates");
+  for (const contour of HICKS_ACCEPTANCE_CONTOURS) {
+    const evidence = contours[contour];
+    const spec = HICKS_ACCEPTANCE_SPECS[contour];
+    validateSourceContour(contour, evidence, spec);
+  }
+  return sourceGates;
+}
+
+export function validateHicksAcceptanceManifest(manifest) {
+  if (!manifest || manifest.schema !== HICKS_ACCEPTANCE_SCHEMA) {
+    throw new Error("Hicks acceptance manifest has an unsupported schema");
+  }
+  if (!manifest.deploymentId || typeof manifest.deploymentId !== "string") {
+    throw new Error("Hicks acceptance manifest has no deployment identity");
+  }
+  if (manifest.networkBoundary !== "none") {
+    throw new Error("Hicks acceptance manifest must declare networkBoundary=none");
+  }
+  validateTimestamp(manifest.deployedAtMs, "Hicks deployment acceptance");
+  validateSourceGates(manifest.sourceGates);
+  const contours = exactContourMap(manifest.contours, "Hicks live");
+  const statuses = new Set(HICKS_ACCEPTANCE_CONTOURS.map((contour) => contours[contour]?.status));
+  if (statuses.size !== 1 || !["awaiting-live", "passed"].includes([...statuses][0])) {
+    throw new Error("Hicks live contours must be uniformly awaiting-live or passed");
+  }
+  if (statuses.has("passed")) {
+    validateTimestamp(manifest.finalizedAtMs, "Hicks live finalization");
+    validateLiveEvidence(manifest.liveEvidence, manifest, undefined);
+    if (manifest.finalizedAtMs < manifest.liveEvidence.createdAtMs) {
+      throw new Error("Hicks live finalization predates its evidence");
+    }
+  }
+  return manifest;
+}
+
+function validateLiveEvidence(evidenceManifest, deploymentAcceptance, nowMs) {
+  if (!evidenceManifest || evidenceManifest.schema !== HICKS_ACCEPTANCE_SCHEMA) {
+    throw new Error("Hicks live evidence has an unsupported schema");
+  }
+  if (evidenceManifest.deploymentId !== deploymentAcceptance.deploymentId) {
+    throw new Error("Hicks live evidence deployment identity does not match the installed bundle");
+  }
+  if (nowMs === undefined) {
+    validateTimestamp(evidenceManifest.createdAtMs, "Hicks live evidence");
+  } else {
+    validateFreshTimestamp(evidenceManifest.createdAtMs, nowMs, "Hicks live evidence");
+  }
+  if (evidenceManifest.createdAtMs < deploymentAcceptance.deployedAtMs) {
+    throw new Error("Hicks live evidence predates the installed deployment");
+  }
+  const contours = exactContourMap(evidenceManifest.contours, "Hicks live evidence");
+  for (const contour of HICKS_ACCEPTANCE_CONTOURS) {
+    if (contours[contour]?.status !== "passed") {
+      throw new Error(`Hicks live evidence is not passed: ${contour}`);
+    }
+  }
+  const guest = contours.guest;
+  if (
+    (typeof guest.telegramUpdateId !== "string" && typeof guest.telegramUpdateId !== "number") ||
+    guest.answerGuestQuery !== true ||
+    typeof guest.providerRequestId !== "string" ||
+    !guest.providerRequestId
+  ) {
+    throw new Error("Hicks Guest live evidence is incomplete");
+  }
+  const delegation = contours["delegation-parallel"];
+  if (
+    typeof delegation.frontAdmissionId !== "string" ||
+    !delegation.frontAdmissionId ||
+    !Array.isArray(delegation.workerIds) ||
+    delegation.workerIds.length < 2 ||
+    delegation.workerIds.some((id) => typeof id !== "string" || !id) ||
+    delegation.overlapObserved !== true ||
+    delegation.parentReconciled !== true ||
+    delegation.finalDeliveryCount !== 1
+  ) {
+    throw new Error("Hicks parallel delegation live evidence is incomplete");
+  }
+  const noFakeProgress = contours["no-fake-progress"];
+  if (
+    noFakeProgress.toolEvidenceOccurred !== true ||
+    !Number.isSafeInteger(noFakeProgress.toolEvidenceAtMs) ||
+    !Number.isSafeInteger(noFakeProgress.finalAtMs) ||
+    noFakeProgress.toolEvidenceAtMs > noFakeProgress.finalAtMs ||
+    noFakeProgress.unsupportedSuccess !== false
+  ) {
+    throw new Error("Hicks no-fake-progress live evidence is incomplete");
+  }
+}
+
+export function finalizeHicksLiveAcceptance({
+  deploymentManifest,
+  evidenceManifest,
+  nowMs = Date.now(),
+}) {
+  validateHicksAcceptanceManifest(deploymentManifest?.hicksAcceptance);
+  if (
+    HICKS_ACCEPTANCE_CONTOURS.some(
+      (contour) => deploymentManifest.hicksAcceptance.contours[contour]?.status !== "awaiting-live",
+    )
+  ) {
+    throw new Error("Hicks deployment is not awaiting live acceptance");
+  }
+  validateLiveEvidence(evidenceManifest, deploymentManifest.hicksAcceptance, nowMs);
+  const finalized = structuredClone(deploymentManifest);
+  finalized.hicksAcceptance = {
+    ...finalized.hicksAcceptance,
+    finalizedAtMs: nowMs,
+    liveEvidence: structuredClone(evidenceManifest),
+    contours: Object.fromEntries(
+      HICKS_ACCEPTANCE_CONTOURS.map((contour) => [contour, { status: "passed" }]),
+    ),
+  };
+  return finalized;
+}
+
+export async function runHicksAcceptanceSuite({ sourceRoot, execute, env, timeoutMs }) {
+  const runner = path.join(sourceRoot, "scripts", "run-vitest.mjs");
+  await acceptanceArtifacts(sourceRoot, ["scripts/run-vitest.mjs"]);
+  const testFiles = HICKS_ACCEPTANCE_CONTOURS.flatMap(
+    (contour) => HICKS_ACCEPTANCE_SPECS[contour].testFiles,
+  );
+  const result = await checked(
+    execute,
+    process.execPath,
+    [runner, ...testFiles, "--run"],
+    { cwd: sourceRoot, env, timeoutMs },
+    "Hicks acceptance tests",
+  );
+  const outputSha256 = crypto.createHash("sha256").update(result.stdout).digest("hex");
+  const contours = {};
+  for (const contour of HICKS_ACCEPTANCE_CONTOURS) {
+    const spec = HICKS_ACCEPTANCE_SPECS[contour];
+    const artifacts = await acceptanceArtifacts(sourceRoot, spec.artifactFiles);
+    contours[contour] = {
+      status: "passed",
+      testFiles: [...spec.testFiles],
+      artifacts,
+      outputSha256,
+    };
+  }
+  return validateSourceGates({
+    schema: HICKS_ACCEPTANCE_SCHEMA,
+    generatedAtMs: Date.now(),
+    runner: "scripts/run-vitest.mjs",
+    networkBoundary: "none",
+    contours,
+  });
+}
+
+export async function verifyHicksPostDeployAcceptance({ installRoot }) {
+  const manifestPath = path.join(installRoot, ".openclaw-deploy-manifest.json");
+  const manifest = await readJson(manifestPath);
+  const acceptance = validateHicksAcceptanceManifest(manifest.hicksAcceptance);
+  if (!manifest.buildIdentity?.repoCommit) {
+    throw new Error("deployed manifest has no build identity");
+  }
+  const buildIdentity = await readBuildIdentity(installRoot, manifest.buildIdentity.repoCommit);
+  if (!sameBuildIdentity(manifest.buildIdentity, buildIdentity)) {
+    throw new Error("installed Hicks build identity does not match its deployment manifest");
+  }
+  return acceptance;
 }
 
 async function assertDirectory(dirPath, label) {
@@ -314,7 +686,15 @@ async function restoreLegacyInstallArtifacts(installRoot, archive) {
   await fs.rm(archive.archiveRoot, { recursive: true, force: true });
 }
 
-async function stageRuntime({ sourceRoot, installRoot, stageRoot, platform, arch }) {
+async function stageRuntime({
+  sourceRoot,
+  installRoot,
+  stageRoot,
+  platform,
+  arch,
+  hicksAcceptance,
+  repoCommit,
+}) {
   if (!(await exists(path.join(sourceRoot, "dist")))) {
     throw new Error(`source dist is missing: ${sourceRoot}`);
   }
@@ -339,6 +719,8 @@ async function stageRuntime({ sourceRoot, installRoot, stageRoot, platform, arch
     }
   }
 
+  const buildIdentity = await readBuildIdentity(stageRoot, repoCommit);
+
   const alias = CODEX_PLATFORM_ALIASES.get(`${platform}:${arch}`);
   if (!alias) {
     throw new Error(`unsupported Codex deployment platform: ${platform}/${arch}`);
@@ -355,6 +737,8 @@ async function stageRuntime({ sourceRoot, installRoot, stageRoot, platform, arch
         packageVersion: sourcePackage.version ?? null,
         codexPlatform: alias,
         codexPackage: "@openai/codex",
+        buildIdentity,
+        hicksAcceptance,
       },
       null,
       2,
@@ -446,6 +830,7 @@ export async function deployRuntime(options, dependencies = {}) {
   const arch = options.arch ?? process.arch;
   const timeoutMs = options.timeoutMs ?? 90_000;
   const execute = dependencies.execute ?? runCommand;
+  const deploymentId = options.deploymentId ?? crypto.randomUUID();
   const paths = deploymentPaths(installRoot, options.stamp);
   const installStats = await fs.lstat(installRoot);
   if (!installStats.isDirectory() || installStats.isSymbolicLink()) {
@@ -480,7 +865,33 @@ export async function deployRuntime(options, dependencies = {}) {
   });
   let validation;
   try {
-    await stageRuntime({ sourceRoot, installRoot, stageRoot: paths.stageRoot, platform, arch });
+    const repoCommit = await resolveRepoCommit(execute, sourceRoot, env, timeoutMs);
+    const sourceGates = await runHicksAcceptanceSuite({
+      sourceRoot,
+      execute,
+      env,
+      timeoutMs,
+    });
+    validateFreshTimestamp(sourceGates.generatedAtMs, Date.now(), "Hicks source gates");
+    const hicksAcceptance = validateHicksAcceptanceManifest({
+      schema: HICKS_ACCEPTANCE_SCHEMA,
+      deploymentId,
+      deployedAtMs: Date.now(),
+      networkBoundary: "none",
+      sourceGates,
+      contours: Object.fromEntries(
+        HICKS_ACCEPTANCE_CONTOURS.map((contour) => [contour, { status: "awaiting-live" }]),
+      ),
+    });
+    await stageRuntime({
+      sourceRoot,
+      installRoot,
+      stageRoot: paths.stageRoot,
+      platform,
+      arch,
+      hicksAcceptance,
+      repoCommit,
+    });
     validation = await validateStage({
       stageRoot: paths.stageRoot,
       platform,
@@ -492,7 +903,14 @@ export async function deployRuntime(options, dependencies = {}) {
     if (options.dryRun) {
       await fs.rm(paths.stageRoot, { recursive: true, force: true });
       await fs.rm(customization.stageRoot, { recursive: true, force: true });
-      return { dryRun: true, ...paths, customization, validation, legacyArchive: null };
+      return {
+        dryRun: true,
+        ...paths,
+        customization,
+        validation,
+        hicksAcceptance,
+        legacyArchive: null,
+      };
     }
 
     let cutoverStarted = false;
@@ -541,7 +959,15 @@ export async function deployRuntime(options, dependencies = {}) {
       if (!smoke.stdout.includes(CODEX_SMOKE_MARKER)) {
         throw new Error(`bounded Gateway agent smoke omitted ${CODEX_SMOKE_MARKER}`);
       }
-      return { dryRun: false, ...paths, customization, validation, legacyArchive };
+      const postDeployAcceptance = await verifyHicksPostDeployAcceptance({ installRoot });
+      return {
+        dryRun: false,
+        ...paths,
+        customization,
+        validation,
+        hicksAcceptance: postDeployAcceptance,
+        legacyArchive,
+      };
     } catch (error) {
       if (error?.legacyArchive) {
         legacyArchive = error.legacyArchive;
@@ -677,6 +1103,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
             }
           : undefined,
         codex: result.validation.evidence,
+        hicksAcceptance: result.hicksAcceptance,
       }),
     );
   } catch (error) {

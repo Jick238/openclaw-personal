@@ -200,7 +200,23 @@ export function parseRecorderReady(value) {
   return { schemaVersion: 1, startedAtUnixMs, chatId: value.chatId };
 }
 
-export function selectChatTarget({ dm, explicitChat, leasedGroupId, sutUsername, testerId }) {
+export function selectChatTarget({
+  dm,
+  guest = false,
+  explicitChat,
+  leasedGroupId,
+  sutUsername,
+  testerId,
+}) {
+  if (guest) {
+    return {
+      kind: "guest-self",
+      // Guest Mode must be exercised from Saved Messages. Do not let a stale
+      // --chat or --dm value redirect a guest probe into an arbitrary chat.
+      recorderSelector: "self",
+      cronDeliveryTarget: null,
+    };
+  }
   if (dm) {
     return {
       kind: "dm",

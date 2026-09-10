@@ -116,6 +116,7 @@ class EventRecorder:
     def _append(self, kind, message_id, raw=None, **fields):
         event = {
             "elapsedMs": int((time.time() - self.started_at) * 1000),
+            "observedAtUnixMs": int(time.time() * 1000),
             "kind": kind,
             "messageId": message_id,
             # Bot API ids are TDLib ids >> 20; keep both so bot-lane and
@@ -347,6 +348,7 @@ class EventRecorder:
             "timeline": [
                 {
                     "elapsedMs": e["elapsedMs"],
+                    "observedAtUnixMs": e.get("observedAtUnixMs"),
                     "kind": e["kind"],
                     "messageId": e["messageId"],
                     "botApiMessageId": e.get("botApiMessageId"),

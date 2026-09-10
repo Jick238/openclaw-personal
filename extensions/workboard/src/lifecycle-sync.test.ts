@@ -313,6 +313,120 @@ describe("Workboard gateway lifecycle sync", () => {
     expect(changes).toHaveBeenCalledOnce();
   });
 
+  it("blocks an orchestrator that ends before its children are terminally reconciled", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const parent = await createLinkedCard(store, {
+      sessionKey: "agent:main:subagent:workboard-parent",
+      runId: "run-parent",
+    });
+    const { children } = await store.decompose(parent.id, {
+      completeParent: false,
+      independentChildren: true,
+      children: [{ title: "unfinished child", status: "todo" }],
+    });
+
+    await syncWorkboardSubagentEnded({
+      store,
+      event: {
+        targetSessionKey: parent.sessionKey!,
+        runId: parent.runId,
+        endedAt: parent.updatedAt + 1,
+        outcome: "ok",
+      },
+    });
+
+    await expect(store.get(parent.id)).resolves.toMatchObject({
+      status: "blocked",
+      metadata: {
+        notifications: [
+          expect.objectContaining({
+            kind: "failed",
+            message: expect.stringContaining("children"),
+          }),
+        ],
+      },
+    });
+    expect((await store.get(children[0]!.id))?.status).toBe("todo");
+  });
+
+  it("blocks an unreconciled orchestrator during the restart recovery sweep", async () => {
+    const store = new WorkboardStore(createMemoryStore());
+    const sessionKey = "agent:hicks-orchestrator:workboard:recovered-parent";
+    const parent = await createLinkedCard(store, {
+      sessionKey,
+      runId: "run-recovered-parent",
+      execution: execution(sessionKey, "run-recovered-parent"),
+    });
+    await store.decompose(parent.id, {
+      completeParent: false,
+      independentChildren: true,
+      children: [{ title: "unfinished recovered child", status: "todo" }],
+    });
+
+    await runSessionSweep({
+      store,
+      sessions: [
+        {
+          key: sessionKey,
+          status: "done",
+          hasActiveRun: false,
+          updatedAt: parent.updatedAt + 1,
+        },
+      ],
+    });
+
+    await expect(store.get(parent.id)).resolves.toMatchObject({
+      status: "blocked",
+      metadata: {
+        notifications: [
+          expect.objectContaining({
+            kind: "failed",
+            message: expect.stringContaining("children"),
+          }),
+        ],
+      },
+    });
+  });
+
+  it.each([
+    ["blocked", "A Workboard child is blocked"],
+    ["done", "without completing its Workboard parent"],
+  ] as const)(
+    "blocks an orchestrator whose child is %s until the parent has an explicit outcome",
+    async (childStatus, expectedReason) => {
+      const store = new WorkboardStore(createMemoryStore());
+      const parent = await createLinkedCard(store, {
+        sessionKey: `agent:main:subagent:workboard-parent-${childStatus}`,
+        runId: `run-parent-${childStatus}`,
+      });
+      const { children } = await store.decompose(parent.id, {
+        completeParent: false,
+        independentChildren: true,
+        children: [{ title: `${childStatus} child`, status: "todo" }],
+      });
+      await store.move(children[0]!.id, childStatus, 0);
+
+      await syncWorkboardSubagentEnded({
+        store,
+        event: {
+          targetSessionKey: parent.sessionKey!,
+          runId: parent.runId,
+          endedAt: parent.updatedAt + 1,
+          outcome: "ok",
+        },
+      });
+
+      await expect(store.get(parent.id)).resolves.toMatchObject({
+        status: "blocked",
+        metadata: {
+          notifications: [
+            expect.objectContaining({ message: expect.stringContaining(expectedReason) }),
+          ],
+        },
+      });
+    },
+  );
+
   it.each(["error", "timeout", "killed"] as const)(
     "moves a linked running card to blocked for subagent outcome %s",
     async (outcome) => {

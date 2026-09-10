@@ -339,7 +339,7 @@ export const dispatchTelegramMessage = async (
     replyQuotePosition: quote.replyQuotePosition,
     replyQuoteText: quote.replyQuoteText,
     resolvedReasoningLevel,
-    statusReactionController: responseTarget ? undefined : status.controller,
+    statusReactionController: responseTarget ? null : status.controller,
     streamMode: responseTarget ? "off" : dispatchParams.streamMode,
     tableMode,
     telegramDeps,

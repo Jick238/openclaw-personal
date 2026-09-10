@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { registerTelegramGuestHandler } from "./bot-handlers.guest.js";
+import type { TelegramMessagePipeline } from "./bot-handlers.message-pipeline.js";
 import type { RegisterTelegramHandlerParams } from "./bot-handlers.types.js";
 
-function createParams(runResultOnly?: (request: any) => Promise<unknown>) {
+function createParams(
+  processMessageWithReplyChain: TelegramMessagePipeline["processMessageWithReplyChain"] = vi.fn(
+    async ({ options }) => {
+      await options?.responseTarget?.deliver("model answer");
+      return { kind: "completed" as const };
+    },
+  ),
+) {
   const handlers = new Map<string, (ctx: any) => Promise<void>>();
   const params = {
     accountId: "default",
@@ -11,14 +19,27 @@ function createParams(runResultOnly?: (request: any) => Promise<unknown>) {
       on: (trigger: string, handler: (ctx: any) => Promise<void>) => handlers.set(trigger, handler),
       api: {},
     },
-    opts: { token: "token", externalTurns: runResultOnly ? { runResultOnly } : undefined },
+    opts: { token: "token" },
     cfg: { commands: { ownerAllowFrom: ["42"] } },
     telegramCfg: {},
     telegramDeps: { readChannelAllowFromStore: vi.fn(async () => []) },
     logger: { warn: vi.fn(), info: vi.fn() },
   } as unknown as RegisterTelegramHandlerParams;
-  registerTelegramGuestHandler(params);
-  return { handlers, params };
+  const messagePipeline = {
+    buildSyntheticTextMessage: vi.fn(({ base, text }: { base: any; text: string }) => ({
+      ...base,
+      text,
+      caption: undefined,
+      caption_entities: undefined,
+    })),
+    buildSyntheticContext: vi.fn((ctx: any, message: any) => ({ ...ctx, message })),
+    processMessageWithReplyChain,
+  } as unknown as Pick<
+    TelegramMessagePipeline,
+    "buildSyntheticTextMessage" | "buildSyntheticContext" | "processMessageWithReplyChain"
+  >;
+  registerTelegramGuestHandler(params, messagePipeline);
+  return { handlers, params, messagePipeline };
 }
 
 function guestContext(params: {
@@ -46,20 +67,27 @@ function guestContext(params: {
 }
 
 describe("Telegram Guest Mode Hicks Front", () => {
-  it("runs one ordinary Front turn and answers one generated article", async () => {
-    const runResultOnly = vi.fn(async () => ({ kind: "completed" as const, text: "model answer" }));
-    const { handlers } = createParams(runResultOnly);
+  it("builds a synthetic message for the ordinary Front and answers one generated article", async () => {
+    const processMessageWithReplyChain = vi.fn<
+      TelegramMessagePipeline["processMessageWithReplyChain"]
+    >(async ({ options }) => {
+      await options?.responseTarget?.deliver("model answer");
+      return { kind: "completed" as const };
+    });
+    const { handlers, messagePipeline } = createParams(processMessageWithReplyChain);
     const ctx = guestContext({ id: "guest-1", text: "summarize this arbitrary request" });
 
     await handlers.get("guest_message")!(ctx);
 
-    expect(runResultOnly).toHaveBeenCalledOnce();
-    expect(runResultOnly).toHaveBeenCalledWith(
+    expect(messagePipeline.buildSyntheticTextMessage).toHaveBeenCalledWith({
+      base: expect.objectContaining({ guest_query_id: "guest-1" }),
+      text: "summarize this arbitrary request",
+    });
+    expect(messagePipeline.buildSyntheticContext).toHaveBeenCalledOnce();
+    expect(processMessageWithReplyChain).toHaveBeenCalledWith(
       expect.objectContaining({
-        senderId: "42",
-        senderIsOwner: true,
-        correlationId: "guest:guest-1",
-        prompt: expect.stringContaining("summarize this arbitrary request"),
+        allMedia: [],
+        options: { responseTarget: expect.any(Object) },
       }),
     );
     expect(ctx.answerGuestQuery).toHaveBeenCalledOnce();
@@ -75,9 +103,26 @@ describe("Telegram Guest Mode Hicks Front", () => {
     expect(result).not.toHaveProperty("reply_markup");
   });
 
-  it("passes bounded reply text, caption, and media context to the same model turn", async () => {
-    const runResultOnly = vi.fn(async () => ({ kind: "completed" as const, text: "answer" }));
-    const { handlers } = createParams(runResultOnly);
+  it("keeps Telegram result ids within the 64-byte contract", async () => {
+    const { handlers } = createParams();
+    const ctx = guestContext({ id: "я".repeat(100), text: "answer" });
+
+    await handlers.get("guest_message")!(ctx);
+
+    const [result] = (ctx.answerGuestQuery.mock.calls as unknown[][])[0] ?? [];
+    expect(Buffer.byteLength(String((result as { id?: unknown }).id), "utf8")).toBeLessThanOrEqual(
+      64,
+    );
+  });
+
+  it("preserves reply and media context in the synthetic Front message", async () => {
+    const processMessageWithReplyChain = vi.fn<
+      TelegramMessagePipeline["processMessageWithReplyChain"]
+    >(async ({ options }) => {
+      await options?.responseTarget?.deliver("answer");
+      return { kind: "completed" as const };
+    });
+    const { handlers, messagePipeline } = createParams(processMessageWithReplyChain);
     const ctx = guestContext({
       id: "guest-reply",
       text: "rewrite it",
@@ -91,21 +136,32 @@ describe("Telegram Guest Mode Hicks Front", () => {
 
     await handlers.get("guest_message")!(ctx);
 
-    const request = (runResultOnly.mock.calls as unknown[][])[0]?.[0] as Record<string, any>;
-    expect(request.prompt).toContain("rewrite it");
-    expect(request.prompt).toContain("original caption");
-    expect(request.prompt).toContain("Attachment: photo");
-    expect(request.prompt).not.toContain("private-file-id");
-    expect(request.sessionKey).toContain("guest:42:guest-reply");
-    expect(request.sessionKey).not.toBe("telegram:default:direct:42");
+    expect(messagePipeline.buildSyntheticTextMessage).toHaveBeenCalledWith({
+      base: expect.objectContaining({
+        guest_query_id: "guest-reply",
+        reply_to_message: expect.objectContaining({
+          caption: "original caption",
+          photo: [{ file_id: "private-file-id" }],
+        }),
+      }),
+      text: "rewrite it",
+    });
+    expect(processMessageWithReplyChain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        msg: expect.objectContaining({ text: "rewrite it" }),
+        allMedia: [],
+      }),
+    );
   });
 
   it("records unauthorized callers and missing query ids without running Front", async () => {
-    const runResultOnly = vi.fn(async () => ({ kind: "empty" as const }));
-    const { handlers, params } = createParams(runResultOnly);
+    const processMessageWithReplyChain = vi.fn<
+      TelegramMessagePipeline["processMessageWithReplyChain"]
+    >(async () => ({ kind: "empty" as const }));
+    const { handlers, params } = createParams(processMessageWithReplyChain);
     const unauthorized = guestContext({ id: "guest-unauthorized", text: "secret", senderId: 99 });
     await handlers.get("guest_message")!(unauthorized);
-    expect(runResultOnly).not.toHaveBeenCalled();
+    expect(processMessageWithReplyChain).not.toHaveBeenCalled();
     expect(unauthorized.answerGuestQuery).not.toHaveBeenCalled();
     expect(params.logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "caller-unauthorized", updateId: 1 }),
@@ -115,7 +171,7 @@ describe("Telegram Guest Mode Hicks Front", () => {
     const missingQueryId = guestContext({ id: "guest-missing-id", text: "secret" });
     delete (missingQueryId.guestMessage as Record<string, unknown>).guest_query_id;
     await handlers.get("guest_message")!(missingQueryId);
-    expect(runResultOnly).not.toHaveBeenCalled();
+    expect(processMessageWithReplyChain).not.toHaveBeenCalled();
     expect(missingQueryId.answerGuestQuery).not.toHaveBeenCalled();
     expect(params.logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "guest-query-id-missing", updateId: 1 }),
@@ -124,22 +180,32 @@ describe("Telegram Guest Mode Hicks Front", () => {
     expect(JSON.stringify(params.logger.info.mock.calls)).not.toContain("secret");
   });
 
-  it("records empty model results without answering Telegram", async () => {
-    const runResultOnly = vi.fn(async () => ({ kind: "empty" as const }));
-    const { handlers, params } = createParams(runResultOnly);
+  it("answers a visible blocker when Front skips the guest turn", async () => {
+    const processMessageWithReplyChain = vi.fn<
+      TelegramMessagePipeline["processMessageWithReplyChain"]
+    >(async () => ({ kind: "skipped" as const }));
+    const { handlers, params } = createParams(processMessageWithReplyChain);
     const empty = guestContext({ id: "guest-empty", text: "nothing" });
     await handlers.get("guest_message")!(empty);
-    expect(runResultOnly).toHaveBeenCalledOnce();
-    expect(empty.answerGuestQuery).not.toHaveBeenCalled();
+    expect(processMessageWithReplyChain).toHaveBeenCalledOnce();
+    expect(empty.answerGuestQuery).toHaveBeenCalledOnce();
+    expect(JSON.stringify(empty.answerGuestQuery.mock.calls)).toContain(
+      "Не удалось обработать запрос",
+    );
     expect(params.logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "result-empty", updateId: 1 }),
+      expect.objectContaining({ reason: "result-skipped", updateId: 1 }),
       "telegram guest turn not admitted",
     );
   });
 
   it("deduplicates the authoritative guest query id", async () => {
-    const runResultOnly = vi.fn(async () => ({ kind: "completed" as const, text: "answer" }));
-    const { handlers } = createParams(runResultOnly);
+    const processMessageWithReplyChain = vi.fn<
+      TelegramMessagePipeline["processMessageWithReplyChain"]
+    >(async ({ options }) => {
+      await options?.responseTarget?.deliver("answer");
+      return { kind: "completed" as const };
+    });
+    const { handlers } = createParams(processMessageWithReplyChain);
     const first = guestContext({ id: "guest-retry", text: "same" });
     const retry = guestContext({ id: "guest-retry", text: "same" });
     await Promise.all([
@@ -147,24 +213,30 @@ describe("Telegram Guest Mode Hicks Front", () => {
       handlers.get("guest_message")!(retry),
     ]);
 
-    expect(runResultOnly).toHaveBeenCalledOnce();
+    expect(processMessageWithReplyChain).toHaveBeenCalledOnce();
     expect(first.answerGuestQuery).toHaveBeenCalledOnce();
     expect(retry.answerGuestQuery).not.toHaveBeenCalled();
   });
 
-  it("releases an in-flight key after a transient model failure", async () => {
-    const runResultOnly = vi
-      .fn()
+  it("answers a visible blocker and deduplicates after a model failure", async () => {
+    const processMessageWithReplyChain = vi
+      .fn<TelegramMessagePipeline["processMessageWithReplyChain"]>()
       .mockRejectedValueOnce(new Error("temporary provider failure"))
-      .mockResolvedValueOnce({ kind: "completed" as const, text: "retry answer" });
-    const { handlers } = createParams(runResultOnly);
+      .mockImplementationOnce(async ({ options }) => {
+        await options?.responseTarget?.deliver("retry answer");
+        return { kind: "completed" as const };
+      });
+    const { handlers } = createParams(processMessageWithReplyChain);
     const first = guestContext({ id: "guest-retryable", text: "retry me" });
     await handlers.get("guest_message")!(first);
-    expect(first.answerGuestQuery).not.toHaveBeenCalled();
+    expect(first.answerGuestQuery).toHaveBeenCalledOnce();
+    expect(JSON.stringify(first.answerGuestQuery.mock.calls)).toContain(
+      "Не удалось обработать запрос",
+    );
 
     const retry = guestContext({ id: "guest-retryable", text: "retry me" });
     await handlers.get("guest_message")!(retry);
-    expect(runResultOnly).toHaveBeenCalledTimes(2);
-    expect(retry.answerGuestQuery).toHaveBeenCalledOnce();
+    expect(processMessageWithReplyChain).toHaveBeenCalledOnce();
+    expect(retry.answerGuestQuery).not.toHaveBeenCalled();
   });
 });

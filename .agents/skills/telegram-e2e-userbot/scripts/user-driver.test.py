@@ -80,6 +80,19 @@ class PhotoContentTest(unittest.TestCase):
             ["getChat", "loadChats", "getChat"],
         )
 
+    def test_resolves_self_to_the_tdlib_saved_messages_chat(self):
+        class FakeClient:
+            def request(self, payload, timeout=20):
+                self.payload = payload
+                self.timeout = timeout
+                return {"id": 4242}
+
+        instance = driver.UserDriver.__new__(driver.UserDriver)
+        instance.client = FakeClient()
+        self.assertEqual(instance.resolve_chat("self"), 4242)
+        self.assertEqual(instance.client.payload["@type"], "getMe")
+        self.assertEqual(instance.client.timeout, 10)
+
     def test_marks_sut_mentions_and_commands_with_utf16_entities(self):
         instance = driver.UserDriver.__new__(driver.UserDriver)
         instance.config = {"sutUsername": "sut_bot", "sutId": 101}

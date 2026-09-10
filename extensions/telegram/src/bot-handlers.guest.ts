@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import type { InlineQueryResult } from "grammy/types";
-import type { RegisterTelegramHandlerParams } from "./bot-handlers.types.js";
 import type { TelegramMessagePipeline } from "./bot-handlers.message-pipeline.js";
+import type { RegisterTelegramHandlerParams } from "./bot-handlers.types.js";
 import type { TelegramAlternateFinalResponseTarget } from "./bot-message-context.types.js";
 import {
   resolveTelegramCommandAuthorization,
@@ -9,6 +10,7 @@ import {
 
 const GUEST_QUERY_MAX_CHARS = 256;
 const GUEST_RESULT_MAX_CHARS = 4_096;
+const GUEST_FAILURE_TEXT = "Не удалось обработать запрос. Попробуйте ещё раз.";
 const GUEST_DEDUPE_TTL_MS = 10 * 60 * 1_000;
 const GUEST_DEDUPE_MAX_ENTRIES = 1_024;
 
@@ -68,6 +70,10 @@ function escapeHtmlBounded(value: string, maxChars: number): string {
   return output;
 }
 
+function guestQueryHash(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
 function messageText(message: GuestMessage | undefined): string {
   return textValue(message?.text) || textValue(message?.caption);
 }
@@ -102,7 +108,7 @@ function guestResult(params: {
   );
   return {
     type: "article",
-    id: `hicks-guest-${String(params.message.guest_query_id).slice(0, 54)}`,
+    id: `hicks-guest-${guestQueryHash(String(params.message.guest_query_id)).slice(0, 52)}`,
     title: "Hicks",
     description: bounded(params.answer, 180),
     input_message_content: {
@@ -126,18 +132,21 @@ function readGuestMessage(ctx: GuestAnswerContext): GuestMessage | undefined {
 
 export function registerTelegramGuestHandler(
   params: RegisterTelegramHandlerParams,
-  message: Pick<TelegramMessagePipeline, "buildSyntheticTextMessage" | "buildSyntheticContext" | "processMessageWithReplyChain">,
+  messagePipeline: Pick<
+    TelegramMessagePipeline,
+    "buildSyntheticTextMessage" | "buildSyntheticContext" | "processMessageWithReplyChain"
+  >,
 ): void {
-  const { bot, accountId, opts, cfg, logger } = params;
+  const { bot, accountId, cfg, logger } = params;
   bot.on("guest_message", async (ctx) => {
     const guestCtx = ctx as unknown as GuestAnswerContext;
-    const message = readGuestMessage(guestCtx);
-    const guestQueryId = textValue(message?.guest_query_id);
+    const guestMessage = readGuestMessage(guestCtx);
+    const guestQueryId = textValue(guestMessage?.guest_query_id);
     // Incoming guest_message updates identify the caller and destination on the
     // ordinary Message.from/chat fields. guest_bot_caller_* belongs to messages
     // sent by a guest bot and must never gate ingress.
-    const caller = message?.from;
-    const callerChat = message?.chat;
+    const caller = guestMessage?.from;
+    const callerChat = guestMessage?.chat;
     const chatId = callerChat?.id;
     const senderId = identifierValue(caller?.id);
     const recordDrop = (reason: string) => {
@@ -150,7 +159,7 @@ export function registerTelegramGuestHandler(
         "telegram guest turn not admitted",
       );
     };
-    if (!message) {
+    if (!guestMessage) {
       recordDrop("message-missing");
       return;
     }
@@ -179,7 +188,7 @@ export function registerTelegramGuestHandler(
       isGroup,
       threadSpec: resolveTelegramMessageThreadSpec({
         chat: { id: numericChatId, type: isGroup ? "group" : "private" },
-        message_id: Number(message.message_id ?? 0),
+        message_id: Number(guestMessage.message_id ?? 0),
         date: 0,
       } as never),
       senderId,
@@ -199,6 +208,20 @@ export function registerTelegramGuestHandler(
     }
     if (guestDedupe.size >= GUEST_DEDUPE_MAX_ENTRIES) {
       recordDrop("capacity-exceeded");
+      try {
+        await guestCtx.answerGuestQuery(
+          guestResult({
+            message: guestMessage,
+            answer: GUEST_FAILURE_TEXT,
+            botUsername: guestCtx.me?.username,
+          }),
+        );
+      } catch (error) {
+        logger.warn(
+          { error: String(error), guestQueryHash: guestQueryHash(guestQueryId).slice(0, 24) },
+          "telegram guest capacity response failed",
+        );
+      }
       return;
     }
     const entry: GuestDedupeEntry = {
@@ -208,44 +231,87 @@ export function registerTelegramGuestHandler(
     };
     const work = (async () => {
       try {
-        const syntheticMessage = message.buildSyntheticTextMessage({
-          base: message as never,
-          text: guestPrompt({ message, botUsername: guestCtx.me?.username }),
+        const syntheticMessage = messagePipeline.buildSyntheticTextMessage({
+          base: guestMessage as never,
+          text: guestPrompt({ message: guestMessage, botUsername: guestCtx.me?.username }),
         });
-        const syntheticCtx = message.buildSyntheticContext(guestCtx as never, syntheticMessage);
+        const syntheticCtx = messagePipeline.buildSyntheticContext(
+          guestCtx as never,
+          syntheticMessage,
+        );
         let attempted = false;
         let answered = false;
         const responseTarget: TelegramAlternateFinalResponseTarget = {
           deliver: async (text) => {
-            if (attempted) return answered;
+            if (attempted) {
+              return answered;
+            }
             attempted = true;
             const accepted = await guestCtx.answerGuestQuery(
-              guestResult({ message, answer: text, botUsername: guestCtx.me?.username }),
+              guestResult({
+                message: guestMessage,
+                answer: text,
+                botUsername: guestCtx.me?.username,
+              }),
             );
             const delivered = accepted !== false;
-            if (delivered) answered = true;
+            if (delivered) {
+              answered = true;
+              entry.answered = true;
+              entry.expiresAt = Date.now() + GUEST_DEDUPE_TTL_MS;
+            }
             return delivered;
           },
         };
-        const result = await message.processMessageWithReplyChain({
+        const deliverFailure = async () => {
+          if (answered || attempted) {
+            return;
+          }
+          await responseTarget.deliver(GUEST_FAILURE_TEXT);
+        };
+        const result = await messagePipeline.processMessageWithReplyChain({
           ctx: syntheticCtx,
           msg: syntheticMessage,
           allMedia: [],
-          storeAllowFrom: params.telegramCfg.allowFrom ?? [],
+          storeAllowFrom: (params.telegramCfg.allowFrom ?? []).map((value) => String(value)),
           options: {
             responseTarget,
           },
         });
         if (result.kind !== "completed") {
           recordDrop(`result-${result.kind}`);
+          await deliverFailure();
           return;
         }
-        if (answered) {
-          entry.answered = true;
-          entry.expiresAt = Date.now() + GUEST_DEDUPE_TTL_MS;
-        }
+        await deliverFailure();
       } catch (error) {
-        logger.warn({ error: String(error), guestQueryId }, "telegram guest turn failed");
+        logger.warn(
+          { error: String(error), guestQueryHash: guestQueryHash(guestQueryId).slice(0, 24) },
+          "telegram guest turn failed",
+        );
+        try {
+          if (!entry.answered) {
+            const accepted = await guestCtx.answerGuestQuery(
+              guestResult({
+                message: guestMessage,
+                answer: GUEST_FAILURE_TEXT,
+                botUsername: guestCtx.me?.username,
+              }),
+            );
+            if (accepted !== false) {
+              entry.answered = true;
+              entry.expiresAt = Date.now() + GUEST_DEDUPE_TTL_MS;
+            }
+          }
+        } catch (deliveryError) {
+          logger.warn(
+            {
+              error: String(deliveryError),
+              guestQueryHash: guestQueryHash(guestQueryId).slice(0, 24),
+            },
+            "telegram guest failure response failed",
+          );
+        }
       } finally {
         if (!entry.answered && guestDedupe.get(key)?.work === entry.work) {
           // A model or Telegram transport failure remains retryable. Once Telegram

@@ -131,6 +131,12 @@ test("validates the recorder-ready artifact as a closed shape", () => {
 });
 
 test("projects DM and group recording targets into cron delivery targets", () => {
+  assert.deepEqual(selectChatTarget({ guest: true, dm: true, explicitChat: "-1001" }), {
+    kind: "guest-self",
+    recorderSelector: "self",
+    cronDeliveryTarget: null,
+  });
+
   assert.deepEqual(selectChatTarget({ dm: true, sutUsername: "sut_bot", testerId: 42 }), {
     kind: "dm",
     recorderSelector: "@sut_bot",

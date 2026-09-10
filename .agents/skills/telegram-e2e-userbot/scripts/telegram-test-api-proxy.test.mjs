@@ -19,7 +19,7 @@ test("inserts the Test Server segment after the bot token", () => {
   assert.throws(() => telegramTestApiPath("/healthz"), /invalid Bot API path/u);
 });
 
-test("proxies method, query, headers, and body to the Test Server path", async () => {
+test("proxies method, query, headers, and body to the Test Server path", async (t) => {
   let observed;
   const upstreamServer = http.createServer((request, response) => {
     let body = "";
@@ -40,6 +40,12 @@ test("proxies method, query, headers, and body to the Test Server path", async (
   });
   const upstream = await listen(upstreamServer);
   const proxy = await startTelegramTestApiProxy({ upstream });
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolveClose) => {
+      upstreamServer.close(resolveClose);
+    });
+  });
   const response = await fetch(`${proxy.apiRoot}/bot123:ABC/sendMessage?chat_id=42`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-marker": "kept" },
@@ -54,12 +60,17 @@ test("proxies method, query, headers, and body to the Test Server path", async (
     body: '{"text":"hello"}',
     marker: "kept",
   });
-  await proxy.close();
-  await new Promise((resolve) => upstreamServer.close(resolve));
+  const [event] = proxy.getApiRequestEvents();
+  assert.deepEqual(
+    { method: event?.method, ordinal: event?.ordinal, status: event?.status },
+    { method: "sendMessage", ordinal: 1, status: 201 },
+  );
+  assert.equal(typeof event?.observedAt, "number");
 });
 
 test("drains every pending Test Server update", async () => {
   const offsets = [];
+  let drainBody;
   const upstreamServer = http.createServer((request, response) => {
     let body = "";
     request.setEncoding("utf8");
@@ -68,6 +79,7 @@ test("drains every pending Test Server update", async () => {
     });
     request.on("end", () => {
       offsets.push(JSON.parse(body).offset);
+      drainBody = JSON.parse(body);
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify({ ok: true, result: offsets.length === 1 ? [{ update_id: 7 }] : [] }),
@@ -80,6 +92,7 @@ test("drains every pending Test Server update", async () => {
   await proxy.drainUpdates("123:ABC");
 
   assert.deepEqual(offsets, [0, 8]);
+  assert.deepEqual(drainBody.allowed_updates, ["message", "edited_message", "guest_message"]);
   await proxy.close();
   await new Promise((resolve) => upstreamServer.close(resolve));
 });

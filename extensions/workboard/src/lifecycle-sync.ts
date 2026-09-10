@@ -15,7 +15,12 @@ import {
   workboardCardMatchesLifecycleLink,
   workboardCardSessionLookupKey,
 } from "./session-link.js";
-import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
+import {
+  cardChildIds,
+  cardRunId,
+  cardSessionKey,
+  shouldSyncWorkboardLifecycleStatus,
+} from "./store-card-helpers.js";
 import { DEFAULT_WORKBOARD_DISPATCH_OWNER } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -109,6 +114,48 @@ const LIFECYCLE_TARGETS = {
   { card?: WorkboardStatus; execution?: WorkboardExecutionStatus }
 >;
 
+const ORCHESTRATOR_CHILDREN_NOT_RECONCILED_REASON =
+  "Orchestrator ended before its Workboard children were terminally reconciled.";
+const ORCHESTRATOR_CHILD_BLOCKED_REASON =
+  "A Workboard child is blocked; orchestrator completion cannot be accepted.";
+const ORCHESTRATOR_PARENT_NOT_COMPLETED_REASON =
+  "Orchestrator ended without completing its Workboard parent after all children succeeded.";
+
+async function blockUnreconciledOrchestrator(params: {
+  store: WorkboardStore;
+  card: WorkboardCard;
+  observation: WorkboardLifecycleObservation;
+}): Promise<boolean> {
+  if (
+    params.observation.state !== "succeeded" ||
+    !shouldSyncWorkboardLifecycleStatus(params.card, "review")
+  ) {
+    return false;
+  }
+  // A successful orchestrator session is not an owner-visible completion;
+  // Workboard's child manifest is authoritative until every child is terminal.
+  const childIds = [
+    ...new Set([
+      ...cardChildIds(params.card),
+      ...(params.card.metadata?.automation?.createdCardIds ?? []),
+    ]),
+  ];
+  if (childIds.length === 0) {
+    return false;
+  }
+  const cardsById = new Map((await params.store.list()).map((card) => [card.id, card]));
+  const children = childIds.map((id) => cardsById.get(id));
+  const reason = children.some((child) => child?.status === "blocked")
+    ? ORCHESTRATOR_CHILD_BLOCKED_REASON
+    : children.some((child) => !child || child.status !== "done")
+      ? ORCHESTRATOR_CHILDREN_NOT_RECONCILED_REASON
+      : ORCHESTRATOR_PARENT_NOT_COMPLETED_REASON;
+  await params.store.block(params.card.id, { reason }, null, {
+    expectedUpdatedAt: params.card.updatedAt,
+  });
+  return true;
+}
+
 async function syncWorkboardCardLifecycle(params: {
   store: WorkboardStore;
   cardId: string;
@@ -144,24 +191,32 @@ async function syncWorkboardLifecycleEvent(params: {
     (card) => !card.metadata?.archivedAt && workboardCardMatchesLifecycleLink(card, params.source),
   );
   const updates = Promise.all(
-    cards.map(
-      async (card) =>
-        await syncWorkboardCardLifecycle({
-          ...params,
-          cardId: card.id,
-          ...(params.source.sessionKey
-            ? {
-                association: {
-                  ...(cardSessionKey(card) ? { expectedSessionKey: cardSessionKey(card) } : {}),
-                  ...(cardRunId(card) ? { expectedRunId: cardRunId(card) } : {}),
-                  sessionKey: params.source.sessionKey,
-                  ...(params.source.runId ? { runId: params.source.runId } : {}),
-                  acceptedAt: params.observation.sourceUpdatedAt ?? params.now,
-                },
-              }
-            : {}),
-        }),
-    ),
+    cards.map(async (card) => {
+      if (
+        await blockUnreconciledOrchestrator({
+          store: params.store,
+          card,
+          observation: params.observation,
+        })
+      ) {
+        return true;
+      }
+      return await syncWorkboardCardLifecycle({
+        ...params,
+        cardId: card.id,
+        ...(params.source.sessionKey
+          ? {
+              association: {
+                ...(cardSessionKey(card) ? { expectedSessionKey: cardSessionKey(card) } : {}),
+                ...(cardRunId(card) ? { expectedRunId: cardRunId(card) } : {}),
+                sessionKey: params.source.sessionKey,
+                ...(params.source.runId ? { runId: params.source.runId } : {}),
+                acceptedAt: params.observation.sourceUpdatedAt ?? params.now,
+              },
+            }
+          : {}),
+      });
+    }),
   );
   await Promise.all([
     updates,
@@ -347,6 +402,16 @@ async function syncWorkboardLifecycleSessions(params: {
       continue;
     }
     const observation = lifecycleFromSession(session, now);
+    if (
+      await blockUnreconciledOrchestrator({
+        store: params.store,
+        card,
+        observation,
+      })
+    ) {
+      count += 1;
+      continue;
+    }
     if (
       await syncWorkboardCardLifecycle({
         store: params.store,

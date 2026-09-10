@@ -9,6 +9,7 @@ import {
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { log } from "../../agents/embedded-agent-runner/logger.js";
 import { createDeferredEmbeddedRunLifecycleManager } from "../../agents/embedded-agent-runner/run/deferred-lifecycle-owner.js";
+import type { RunEmbeddedAgentInternalParams } from "../../agents/embedded-agent-runner/run/internal-params.js";
 import { runEmbeddedAgent as runEmbeddedAgentCore } from "../../agents/embedded-agent.js";
 import { recordRuntimeActionDecision } from "../../audit/runtime-action-decision.js";
 import type {
@@ -25,8 +26,13 @@ type PluginEmbeddedAgentInternalOptions = {
   deferAdmissionCloseUntil?: Promise<void>;
 };
 
+type PluginEmbeddedAgentOwnedParams = Omit<
+  RunEmbeddedAgentInternalParams,
+  "admittedRunContext" | "preparedRunAdmission" | "skillWorkshopCollectionReconcile" | "timeoutMs"
+> & { timeoutMs?: number };
+
 const runPluginEmbeddedAgentOwned = async (
-  params: Parameters<PluginRuntime["agent"]["runEmbeddedAgent"]>[0],
+  params: PluginEmbeddedAgentOwnedParams,
   options?: PluginEmbeddedAgentInternalOptions,
 ) => {
   const pluginId = getPluginRuntimeGatewayRequestScope()?.pluginId;
@@ -80,7 +86,11 @@ const runPluginEmbeddedAgentOwned = async (
   params.abortSignal?.addEventListener("abort", close, { once: true });
   try {
     params.abortSignal?.throwIfAborted();
-    const result = await runEmbeddedAgentCore({ ...params, preparedRunAdmission });
+    const result = await runEmbeddedAgentCore({
+      ...params,
+      preparedRunAdmission,
+      // SAFETY: result-only callbacks omit the internal deadline and remain abort-signal-owned.
+    } as RunEmbeddedAgentInternalParams);
     if (admittedRunContext && getAdmittedRunDelegatedAuthority(admittedRunContext)) {
       recordRuntimeActionDecision({
         token: admittedRunContext.executionIdentityToken,
@@ -179,9 +189,9 @@ export const runPluginEmbeddedAgentForResult = async (
         },
         workspaceDir: resolveAgentWorkspaceDir(config, agentId),
         prompt: request.prompt,
-      ...(request.timeoutMs === undefined
-        ? {}
-        : { timeoutMs: request.timeoutMs, runTimeoutOverrideMs: request.timeoutMs }),
+        ...(request.timeoutMs === undefined
+          ? {}
+          : { timeoutMs: request.timeoutMs, runTimeoutOverrideMs: request.timeoutMs }),
         runId,
         messageChannel: request.channel,
         messageProvider: request.channel,

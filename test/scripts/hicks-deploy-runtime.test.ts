@@ -2,9 +2,18 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CODEX_SMOKE_MARKER, deployRuntime } from "../../scripts/hicks-deploy-runtime.mjs";
+import {
+  CODEX_SMOKE_MARKER,
+  HICKS_ACCEPTANCE_CONTOURS,
+  HICKS_ACCEPTANCE_MAX_AGE_MS,
+  deployRuntime,
+  finalizeHicksLiveAcceptance,
+  validateHicksAcceptanceManifest,
+  verifyHicksPostDeployAcceptance,
+} from "../../scripts/hicks-deploy-runtime.mjs";
 
 const CODEX_VERSION = "0.151.0";
+const FIXTURE_COMMIT = "a".repeat(40);
 
 async function write(filePath: string, contents: string) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -85,6 +94,23 @@ if (args[0] === "doctor") {
       path.join(runtimeRoot, "dist", "marker.txt"),
       runtimeRoot === installRoot ? "old" : "new",
     );
+    await write(
+      path.join(runtimeRoot, "dist", "build-info.json"),
+      JSON.stringify({ version: "new", commit: FIXTURE_COMMIT }),
+    );
+    await write(
+      path.join(runtimeRoot, "dist", ".buildstamp"),
+      JSON.stringify({ builtAt: Date.now(), head: FIXTURE_COMMIT }),
+    );
+    await write(
+      path.join(runtimeRoot, "dist", ".runtime-postbuildstamp"),
+      JSON.stringify({ syncedAt: Date.now(), head: FIXTURE_COMMIT }),
+    );
+    await write(path.join(runtimeRoot, "dist", "telegram-ingress-worker.runtime.js"), "worker\n");
+    await write(
+      path.join(runtimeRoot, "dist", "telegram-ingress-drain-factory-fixture.js"),
+      "drain\n",
+    );
   }
   await fs.mkdir(workspaceRoot, { recursive: true });
   await write(path.join(sourceRoot, "customization", "hicks", "OWNER_POLICY.md"), "owner policy\n");
@@ -94,10 +120,30 @@ if (args[0] === "doctor") {
   );
   await write(path.join(sourceRoot, "HICKS_ARCHITECTURE_PLAN.md"), "architecture plan\n");
   await write(path.join(sourceRoot, "WORKLOG.md"), "worklog\n");
+  await write(
+    path.join(sourceRoot, "scripts", "run-vitest.mjs"),
+    "console.log('fixture unit tests passed');\n",
+  );
+  for (const relativePath of [
+    "extensions/telegram/src/bot-handlers.guest.ts",
+    "extensions/telegram/src/bot-handlers.guest.test.ts",
+    "extensions/workboard/src/front-admission.ts",
+    "extensions/workboard/src/dispatcher.ts",
+    "extensions/workboard/src/front-admission.test.ts",
+    "extensions/workboard/src/dispatcher.test.ts",
+    "extensions/workboard/src/dispatcher-ownership.test.ts",
+    "extensions/workboard/src/lifecycle-sync.test.ts",
+    "extensions/workboard/src/lifecycle-sync.restart.test.ts",
+    "extensions/workboard/src/lifecycle-sync.ts",
+  ]) {
+    await write(path.join(sourceRoot, relativePath), "fixture acceptance artifact\n");
+  }
   await write(path.join(workspaceRoot, "hicks-reference", "WORKLOG.md"), "old worklog\n");
   await write(path.join(stateDir, "sentinel.txt"), "preserve-me");
   await write(path.join(binDir, "systemctl"), "#!/bin/sh\nexit 0\n");
   await fs.chmod(path.join(binDir, "systemctl"), 0o755);
+  await write(path.join(binDir, "git"), `#!/bin/sh\nprintf '%s\\n' '${FIXTURE_COMMIT}'\n`);
+  await fs.chmod(path.join(binDir, "git"), 0o755);
   return { root, sourceRoot, installRoot, stateDir, workspaceRoot, binDir };
 }
 
@@ -126,6 +172,10 @@ describe("hicks runtime deployment transaction", () => {
     });
 
     expect(result.dryRun).toBe(true);
+    expect(result.hicksAcceptance?.networkBoundary).toBe("none");
+    expect(Object.keys(result.hicksAcceptance?.contours ?? {}).toSorted()).toEqual(
+      [...HICKS_ACCEPTANCE_CONTOURS].toSorted(),
+    );
     expect(await fs.readFile(path.join(fixture.installRoot, "dist", "marker.txt"), "utf8")).toBe(
       "old",
     );
@@ -151,6 +201,15 @@ describe("hicks runtime deployment transaction", () => {
     });
 
     expect(result.dryRun).toBe(false);
+    expect(result.hicksAcceptance?.contours.guest.status).toBe("awaiting-live");
+    expect(result.hicksAcceptance?.contours["delegation-parallel"].status).toBe("awaiting-live");
+    expect(result.hicksAcceptance?.contours["no-fake-progress"].status).toBe("awaiting-live");
+    const installedManifest = JSON.parse(
+      await fs.readFile(path.join(fixture.installRoot, ".openclaw-deploy-manifest.json"), "utf8"),
+    );
+    expect(installedManifest.hicksAcceptance).toEqual(result.hicksAcceptance);
+    expect(installedManifest.buildIdentity.repoCommit).toBe(FIXTURE_COMMIT);
+    expect(installedManifest.buildIdentity.artifacts).toHaveLength(5);
     expect(await fs.readFile(path.join(fixture.installRoot, "dist", "marker.txt"), "utf8")).toBe(
       "new",
     );
@@ -175,6 +234,13 @@ describe("hicks runtime deployment transaction", () => {
     expect(
       await fs.readFile(path.join(result.customization.backupRoot, "WORKLOG.md"), "utf8"),
     ).toBe("old worklog\n");
+    await write(
+      path.join(fixture.installRoot, "dist", "telegram-ingress-worker.runtime.js"),
+      "tampered\n",
+    );
+    await expect(
+      verifyHicksPostDeployAcceptance({ installRoot: fixture.installRoot }),
+    ).rejects.toThrow(/build identity/);
   });
 
   it("archives legacy install backups outside the canonical bundle", async () => {
@@ -468,5 +534,192 @@ describe("hicks runtime deployment transaction", () => {
         stamp: "fixture-missing-workspace",
       }),
     ).rejects.toThrow(/Hicks workspace root is missing/);
+  });
+
+  it("fails closed when the Guest regression artifact is absent", async () => {
+    const fixture = await makeFixture();
+    fixtureRoot = fixture.root;
+    await fs.rm(
+      path.join(fixture.sourceRoot, "extensions/telegram/src/bot-handlers.guest.test.ts"),
+    );
+
+    await expect(
+      deployRuntime({
+        sourceRoot: fixture.sourceRoot,
+        installRoot: fixture.installRoot,
+        stateDir: fixture.stateDir,
+        workspaceRoot: fixture.workspaceRoot,
+        platform: process.platform,
+        arch: process.arch,
+        dryRun: true,
+        stamp: "fixture-missing-guest-proof",
+        env: { PATH: `${fixture.binDir}:${process.env.PATH ?? ""}` },
+      }),
+    ).rejects.toThrow(/Hicks acceptance artifact is missing/);
+  });
+
+  it("rejects missing and stale contour evidence", async () => {
+    const fixture = await makeFixture();
+    fixtureRoot = fixture.root;
+    const result = await deployRuntime({
+      sourceRoot: fixture.sourceRoot,
+      installRoot: fixture.installRoot,
+      stateDir: fixture.stateDir,
+      workspaceRoot: fixture.workspaceRoot,
+      platform: process.platform,
+      arch: process.arch,
+      dryRun: true,
+      stamp: "fixture-acceptance-manifest",
+      env: { PATH: `${fixture.binDir}:${process.env.PATH ?? ""}` },
+    });
+    const missingContour = structuredClone(result.hicksAcceptance);
+    delete missingContour.contours.guest;
+    expect(() => validateHicksAcceptanceManifest(missingContour)).toThrow(/contours mismatch/);
+
+    const stale = structuredClone(result.hicksAcceptance);
+    stale.deployedAtMs = Date.now() - HICKS_ACCEPTANCE_MAX_AGE_MS - 1;
+    stale.sourceGates.generatedAtMs = stale.deployedAtMs;
+    expect(() => validateHicksAcceptanceManifest(stale)).not.toThrow();
+  });
+
+  it("keeps deployment acceptance in local unit tests without Telegram sends", async () => {
+    const fixture = await makeFixture();
+    fixtureRoot = fixture.root;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const execute = async (command: string, args: string[]) => {
+      calls.push({ command, args });
+      if (args.includes("rev-parse")) {
+        return { command, args, status: 0, stdout: `${FIXTURE_COMMIT}\n`, stderr: "" };
+      }
+      if (args.includes("doctor")) {
+        return {
+          command,
+          args,
+          status: 0,
+          stdout: JSON.stringify({ ok: true, findings: [] }),
+          stderr: "",
+        };
+      }
+      if (args.includes("agent")) {
+        return { command, args, status: 0, stdout: CODEX_SMOKE_MARKER, stderr: "" };
+      }
+      return { command, args, status: 0, stdout: "unit tests passed", stderr: "" };
+    };
+    const result = await deployRuntime(
+      {
+        sourceRoot: fixture.sourceRoot,
+        installRoot: fixture.installRoot,
+        stateDir: fixture.stateDir,
+        workspaceRoot: fixture.workspaceRoot,
+        platform: process.platform,
+        arch: process.arch,
+        dryRun: true,
+        stamp: "fixture-local-acceptance",
+      },
+      { execute },
+    );
+
+    expect(result.hicksAcceptance?.networkBoundary).toBe("none");
+    expect(
+      calls.filter(({ args }) => args.some((arg) => arg.endsWith("run-vitest.mjs"))),
+    ).toHaveLength(1);
+    expect(calls.some(({ args }) => args.includes("send"))).toBe(false);
+  });
+
+  it("finalizes only correlated live evidence for all Hicks contours", async () => {
+    const fixture = await makeFixture();
+    fixtureRoot = fixture.root;
+    const result = await deployRuntime({
+      sourceRoot: fixture.sourceRoot,
+      installRoot: fixture.installRoot,
+      stateDir: fixture.stateDir,
+      workspaceRoot: fixture.workspaceRoot,
+      platform: process.platform,
+      arch: process.arch,
+      dryRun: true,
+      stamp: "fixture-live-finalization",
+      env: { PATH: `${fixture.binDir}:${process.env.PATH ?? ""}` },
+    });
+    const nowMs = Date.now();
+    const deploymentManifest = { hicksAcceptance: result.hicksAcceptance };
+    const evidenceManifest = {
+      schema: 2,
+      deploymentId: result.hicksAcceptance.deploymentId,
+      createdAtMs: nowMs,
+      contours: {
+        guest: {
+          status: "passed",
+          telegramUpdateId: 182010731,
+          answerGuestQuery: true,
+          providerRequestId: "provider-request-1",
+        },
+        "delegation-parallel": {
+          status: "passed",
+          frontAdmissionId: "admission-1",
+          workerIds: ["worker-a", "worker-b"],
+          overlapObserved: true,
+          parentReconciled: true,
+          finalDeliveryCount: 1,
+        },
+        "no-fake-progress": {
+          status: "passed",
+          toolEvidenceOccurred: true,
+          toolEvidenceAtMs: nowMs - 10,
+          finalAtMs: nowMs,
+          unsupportedSuccess: false,
+        },
+      },
+    };
+
+    const finalized = finalizeHicksLiveAcceptance({
+      deploymentManifest,
+      evidenceManifest,
+      nowMs,
+    });
+    expect(finalized.hicksAcceptance.contours).toEqual({
+      guest: { status: "passed" },
+      "delegation-parallel": { status: "passed" },
+      "no-fake-progress": { status: "passed" },
+    });
+    expect(finalized.hicksAcceptance.liveEvidence).toEqual(evidenceManifest);
+    expect(() => validateHicksAcceptanceManifest(finalized.hicksAcceptance)).not.toThrow();
+    expect(() =>
+      finalizeHicksLiveAcceptance({
+        deploymentManifest: finalized,
+        evidenceManifest,
+        nowMs: nowMs + 1,
+      }),
+    ).toThrow(/not awaiting/);
+
+    expect(() =>
+      finalizeHicksLiveAcceptance({
+        deploymentManifest,
+        evidenceManifest: { ...evidenceManifest, deploymentId: "wrong-deployment" },
+        nowMs,
+      }),
+    ).toThrow(/deployment identity/);
+    expect(() =>
+      finalizeHicksLiveAcceptance({
+        deploymentManifest,
+        evidenceManifest: {
+          ...evidenceManifest,
+          contours: {
+            ...evidenceManifest.contours,
+            guest: { status: "passed" },
+          },
+        },
+        nowMs,
+      }),
+    ).toThrow(/Guest live evidence is incomplete/);
+    expect(() =>
+      finalizeHicksLiveAcceptance({
+        deploymentManifest,
+        evidenceManifest: {
+          ...evidenceManifest,
+          createdAtMs: nowMs - HICKS_ACCEPTANCE_MAX_AGE_MS - 1,
+        },
+        nowMs,
+      }),
+    ).toThrow(/stale/);
   });
 });

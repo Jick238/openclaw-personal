@@ -13,15 +13,37 @@ import {
   createScenarioCommandEnvironment,
   drainSutUpdates,
   fenceLeaseFailure,
+  guestCapabilityGate,
   ownChild,
   ownCredentialAcquisition,
   removeRunnerScratch,
+  readGuestProof,
+  resolveGatewayRuntimeRoot,
   runCommand,
   sanitizeChildEnvironment,
   summarizeScenarioCommand,
   waitForGatewayLeaseReady,
   watchChildCompletion,
 } from "./run-mock-sut-user-e2e.mjs";
+
+test("selects an exact installed runtime without moving the harness checkout", () => {
+  assert.equal(
+    resolveGatewayRuntimeRoot({
+      sourceGateway: false,
+      repoRoot: "/repo",
+      env: { HICKS_E2E_RUNTIME_ROOT: "/installed" },
+    }),
+    "/installed",
+  );
+  assert.equal(
+    resolveGatewayRuntimeRoot({
+      sourceGateway: true,
+      repoRoot: "/repo",
+      env: { HICKS_E2E_RUNTIME_ROOT: "/installed" },
+    }),
+    "/repo",
+  );
+});
 
 function startOwnedChild() {
   return ownChild(
@@ -79,6 +101,122 @@ test("runner rejects a live SUT identity that differs from the lease", () => {
     /bot identity does not match the lease/u,
   );
   assert.doesNotThrow(() => assertSutMatchesLease({ id: "42", username: "sut_bot" }, credential));
+});
+
+test("Guest Mode capability gate fails closed for leased bots without the Bot API flag", () => {
+  assert.deepEqual(guestCapabilityGate({ supportsGuestQueries: false }), {
+    ok: false,
+    supportsGuestQueries: false,
+    status: "blocked",
+    reason: "leased SUT getMe lacks supports_guest_queries=true",
+  });
+  assert.equal(guestCapabilityGate({}).status, "blocked");
+  assert.equal(guestCapabilityGate({ supportsGuestQueries: true }).ok, true);
+});
+
+test("Guest Mode proof rejects an ordinary SUT message without guest ingress", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "telegram-guest-proof-"));
+  try {
+    const recordPath = path.join(root, "events.ndjson");
+    fs.writeFileSync(
+      recordPath,
+      `${JSON.stringify({
+        kind: "message",
+        isSut: true,
+        senderId: 42,
+        messageId: 99,
+        observedAtUnixMs: 1_300,
+        text: "OPENCLAW_E2E_OK",
+      })}\n`,
+    );
+    const failed = readGuestProof({
+      recordPath,
+      apiRequests: [
+        {
+          method: "answerGuestQuery",
+          status: 200,
+          ok: true,
+          guestQueryHash: "a".repeat(24),
+          observedAt: 1_200,
+        },
+      ],
+      guestIngressEvents: [],
+      providerRequests: [
+        {
+          seq: 1,
+          method: "POST",
+          path: "/v1/responses",
+          runMarker: "guest-run",
+          observedAt: 1_100,
+        },
+      ],
+      runMarker: "guest-run",
+      sutId: "42",
+      expectedText: "OPENCLAW_E2E_OK",
+    });
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.orderedChain, false);
+
+    const passed = readGuestProof({
+      recordPath,
+      apiRequests: [
+        {
+          method: "answerGuestQuery",
+          status: 200,
+          ok: true,
+          guestQueryHash: "a".repeat(24),
+          ordinal: 3,
+          observedAt: 1_200,
+        },
+      ],
+      guestIngressEvents: [{ updateId: 7, guestQueryHash: "a".repeat(24), observedAt: 1_000 }],
+      providerRequests: [
+        {
+          seq: 1,
+          method: "POST",
+          path: "/v1/responses",
+          runMarker: "guest-run",
+          observedAt: 1_100,
+        },
+      ],
+      runMarker: "guest-run",
+      sutId: "42",
+      expectedText: "OPENCLAW_E2E_OK",
+    });
+    assert.equal(passed.status, "passed");
+    assert.equal(passed.orderedChain, true);
+    assert.equal(
+      readGuestProof({
+        recordPath,
+        apiRequests: [
+          {
+            method: "answerGuestQuery",
+            status: 200,
+            ok: true,
+            guestQueryHash: "a".repeat(24),
+            ordinal: 3,
+            observedAt: 1_200,
+          },
+        ],
+        guestIngressEvents: [{ updateId: 7, guestQueryHash: "a".repeat(24), observedAt: 1_000 }],
+        providerRequests: [
+          {
+            seq: 1,
+            method: "POST",
+            path: "/v1/responses",
+            runMarker: "guest-run",
+            observedAt: 1_100,
+          },
+        ],
+        runMarker: "guest-run",
+        sutId: "42",
+        expectedText: "different-run-marker",
+      }).status,
+      "failed",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("scenario commands receive the leased test harness without broker authority", () => {

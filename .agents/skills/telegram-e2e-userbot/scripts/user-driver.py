@@ -484,6 +484,14 @@ class UserDriver:
         chat = chat or default_chat(self.config, self.bot_config)
         if not chat:
             raise DriverError("Missing chat. Pass --chat or configure defaultChatId. Run `user-driver.py chats --json` to list chats visible to the tester account.")
+        if chat.strip().lower() == "self":
+            # `self` is the TDLib Saved Messages chat. Guest probes use this
+            # explicit selector so a stale group/default cannot receive a turn.
+            me = self.client.request({"@type": "getMe"}, timeout=10)
+            user_id = me.get("id")
+            if not isinstance(user_id, int) or user_id == 0:
+                raise DriverError("TDLib getMe returned no usable self chat id")
+            return user_id
         if chat.startswith("https://t.me/+") or chat.startswith("tg://join") or "joinchat" in chat:
             return self.client.request({"@type": "joinChatByInviteLink", "invite_link": chat})["id"]
         if chat.startswith("@"):

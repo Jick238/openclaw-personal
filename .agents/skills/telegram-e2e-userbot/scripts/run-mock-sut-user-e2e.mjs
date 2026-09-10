@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -82,6 +83,18 @@ export function summarizeScenarioCommand({ action, result, elapsedMs, durationMs
     cwd: action.cwd,
     exitCode: result.status,
     timedOut: result.timedOut,
+  };
+}
+
+export function guestCapabilityGate(sut) {
+  const supportsGuestQueries =
+    typeof sut?.supportsGuestQueries === "boolean" ? sut.supportsGuestQueries : null;
+  return {
+    ok: supportsGuestQueries === true,
+    supportsGuestQueries,
+    status: supportsGuestQueries === true ? "ready" : "blocked",
+    reason:
+      supportsGuestQueries === true ? null : "leased SUT getMe lacks supports_guest_queries=true",
   };
 }
 
@@ -189,6 +202,7 @@ function parseArgs(argv) {
     output: "",
     chat: "",
     dm: false,
+    guest: false,
     // Messages posted as the QA user before the driven turn, so history-scoped
     // scenarios (historyLimit, context visibility) have prior turns to scope.
     preSend: [],
@@ -226,6 +240,7 @@ function parseArgs(argv) {
       );
     } else if (arg === "--chat") args.chat = argv[++i] || "";
     else if (arg === "--dm") args.dm = true;
+    else if (arg === "--guest") args.guest = true;
     else if (arg === "--pre-send") args.preSend.push(argv[++i] || "");
     else if (arg === "--scenario") args.scenarioPath = argv[++i] || "";
     else if (arg === "--source-gateway") args.sourceGateway = true;
@@ -249,6 +264,22 @@ function parseArgs(argv) {
     throw new Error(
       "Photo turns require recording; use --record and inspect the captured timeline.",
     );
+  }
+  if (args.guest && !args.record) {
+    throw new Error("--guest requires --record so the user-visible proof is preserved.");
+  }
+  if (args.guest && args.backend !== "mock") {
+    throw new Error(
+      "--guest requires --backend mock so the provider request artifact is available.",
+    );
+  }
+  if (args.guest && (args.scenarioPath || args.photos.length)) {
+    throw new Error(
+      "--guest is a single-text probe and cannot be combined with --scenario or --photo.",
+    );
+  }
+  if (args.guest && (args.chat || args.dm)) {
+    throw new Error("--guest always targets Saved Messages; omit --chat and --dm.");
   }
   if (args.scenarioPath) {
     if (!args.record) {
@@ -283,6 +314,10 @@ function printHelp() {
     --backend qa-mock --scenario /tmp/scenario.json \\
     --record /tmp/events.ndjson --output /tmp/summary.json
 
+  node .agents/skills/telegram-e2e-userbot/scripts/run-mock-sut-user-e2e.mjs \\
+    --guest --text '@{sut} Reply exactly: USER-E2E-{run}' \\
+    --record /tmp/guest-events.ndjson --output /tmp/guest-summary.json
+
   Scenario files use a closed JSON action list. See features/README.md for supported actions.
   Add health.intervalMs to sample Gateway liveness during the timeline.
 
@@ -313,9 +348,35 @@ function readJson(pathname) {
 }
 
 function countNdjsonRows(pathname) {
-  return fs.existsSync(pathname)
-    ? fs.readFileSync(pathname, "utf8").trim().split("\n").filter(Boolean).length
-    : 0;
+  if (!fs.existsSync(pathname)) return 0;
+  return fs
+    .readFileSync(pathname, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .reduce((count, line) => {
+      try {
+        const row = JSON.parse(line);
+        return row && typeof row === "object" && !Array.isArray(row) ? count + 1 : count;
+      } catch {
+        return count;
+      }
+    }, 0);
+}
+
+function readProviderRequestLog(pathname) {
+  if (!fs.existsSync(pathname)) return { rows: [], malformed: 0 };
+  const rows = [];
+  let malformed = 0;
+  for (const line of fs.readFileSync(pathname, "utf8").split("\n").filter(Boolean)) {
+    try {
+      const row = JSON.parse(line);
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("not an object");
+      rows.push(row);
+    } catch {
+      malformed += 1;
+    }
+  }
+  return { rows, malformed };
 }
 
 function isPlainObject(value) {
@@ -563,7 +624,7 @@ export async function drainSutUpdates(sutToken, lease, fetchImpl = fetch) {
   const updates = await telegram(
     sutToken,
     "getUpdates",
-    { timeout: 0, allowed_updates: ["message", "edited_message"] },
+    { timeout: 0, allowed_updates: ["message", "edited_message", "guest_message"] },
     lease,
     fetchImpl,
   );
@@ -590,9 +651,115 @@ async function sutIdentity(credential, lease) {
   if (!me.username) {
     throw new Error("SUT bot has no username; DM mode and mention targeting need a bot username.");
   }
-  const sut = { id: String(me.id), username: me.username };
+  const sut = {
+    id: String(me.id),
+    username: me.username,
+    supportsGuestQueries:
+      typeof me.supports_guest_queries === "boolean" ? me.supports_guest_queries : null,
+  };
   assertSutMatchesLease(sut, credential);
   return sut;
+}
+
+export function readGuestProof({
+  recordPath,
+  apiRequests,
+  guestIngressEvents,
+  providerRequests,
+  runMarker,
+  sutId,
+  expectedText,
+}) {
+  let events = [];
+  if (recordPath && fs.existsSync(recordPath)) {
+    events = fs
+      .readFileSync(recordPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+  const ingress = (guestIngressEvents ?? []).filter(
+    (event) =>
+      Number.isSafeInteger(event?.updateId) &&
+      typeof event?.guestQueryHash === "string" &&
+      /^[a-f0-9]{24}$/u.test(event.guestQueryHash) &&
+      Number.isSafeInteger(event?.observedAt),
+  );
+  const answers = (apiRequests ?? []).filter(
+    (event) =>
+      event?.method === "answerGuestQuery" &&
+      event?.ok === true &&
+      event?.status >= 200 &&
+      event?.status < 300 &&
+      typeof event?.guestQueryHash === "string" &&
+      /^[a-f0-9]{24}$/u.test(event.guestQueryHash) &&
+      Number.isSafeInteger(event?.observedAt),
+  );
+  const providers = (providerRequests ?? []).filter(
+    (row) =>
+      row?.runMarker === runMarker &&
+      Number.isSafeInteger(row?.seq) &&
+      row?.method === "POST" &&
+      typeof row?.path === "string" &&
+      /^\/v1\/(responses|chat\/completions)$/u.test(row.path) &&
+      Number.isSafeInteger(row?.observedAt),
+  );
+  const outbound = events.filter(
+    (event) =>
+      event.kind === "message" &&
+      event.isSut === true &&
+      String(event.senderId ?? "") === String(sutId ?? "") &&
+      typeof event.text === "string" &&
+      event.text.includes(expectedText) &&
+      Number.isSafeInteger(event.observedAtUnixMs),
+  );
+  const chains = [];
+  for (const incoming of ingress) {
+    for (const answer of answers) {
+      if (incoming.guestQueryHash !== answer.guestQueryHash) continue;
+      const matchingProviders = providers.filter(
+        (provider) =>
+          provider.observedAt >= incoming.observedAt && provider.observedAt <= answer.observedAt,
+      );
+      const matchingOutbound = outbound.filter(
+        (message) => message.observedAtUnixMs >= answer.observedAt,
+      );
+      if (matchingProviders.length === 1 && matchingOutbound.length === 1) {
+        chains.push({
+          incoming,
+          answer,
+          provider: matchingProviders[0],
+          outbound: matchingOutbound[0],
+        });
+      }
+    }
+  }
+  const passed = chains.length === 1;
+  return {
+    status: passed ? "passed" : "failed",
+    guestIngress: ingress.length === 1,
+    answerGuestQuery: answers.length === 1,
+    providerRequest: providers.length === 1,
+    orderedChain: passed,
+    ...(passed
+      ? {
+          correlation: {
+            guestQueryHash: chains[0].incoming.guestQueryHash,
+            updateId: chains[0].incoming.updateId,
+            providerSeq: chains[0].provider.seq,
+            answerOrdinal: chains[0].answer.ordinal,
+            outboundMessageId: chains[0].outbound.messageId,
+          },
+        }
+      : {}),
+  };
 }
 
 function spawnProcess(command, args, options) {
@@ -973,7 +1140,8 @@ async function main() {
     if (activeCredentialPromise === credentialPromise) activeCredentialPromise = undefined;
     assertRunnerActive();
     credential.assertLeaseHealthy();
-    await drive(args, repoRoot, credential);
+    const exitCode = await drive(args, repoRoot, credential);
+    if (Number.isInteger(exitCode)) process.exitCode = exitCode;
     credential.assertLeaseHealthy();
   } finally {
     if (activeCredentialPromise === credentialPromise) activeCredentialPromise = undefined;
@@ -993,7 +1161,7 @@ async function drive(args, repoRoot, creds) {
     },
   });
   try {
-    await driveWithTelegramProxy(args, repoRoot, {
+    return await driveWithTelegramProxy(args, repoRoot, {
       ...creds,
       telegramApiRoot: telegramProxy.apiRoot,
       telegramProxy,
@@ -1003,7 +1171,18 @@ async function drive(args, repoRoot, creds) {
   }
 }
 
+export function resolveGatewayRuntimeRoot({ sourceGateway, repoRoot, env = process.env }) {
+  return sourceGateway ? repoRoot : resolve(env.HICKS_E2E_RUNTIME_ROOT || repoRoot);
+}
+
 async function driveWithTelegramProxy(args, repoRoot, creds) {
+  const runtimeRoot = resolveGatewayRuntimeRoot({
+    sourceGateway: args.sourceGateway,
+    repoRoot,
+  });
+  if (!args.sourceGateway && !fs.existsSync(path.join(runtimeRoot, "dist/entry.js"))) {
+    throw new Error(`Exact runtime root is missing dist/entry.js: ${runtimeRoot}`);
+  }
   const driverEnv = { ...sanitizeChildEnvironment(), ...creds.driverEnv };
   const leaseFailure = creds.whenLeaseUnhealthy.then((error) => ({
     type: "lease-failure",
@@ -1013,9 +1192,23 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
   assertTesterMatchesLease(tester, creds);
   const lease = { assertHealthy: creds.assertLeaseHealthy, whenUnhealthy: leaseFailure };
   const sut = await sutIdentity(creds, lease);
+  const guestCapability = args.guest ? guestCapabilityGate(sut) : undefined;
+  if (guestCapability && !guestCapability.ok) {
+    const blocked = {
+      completed: false,
+      mode: "guest",
+      status: "blocked",
+      guestCapability,
+      reason: "Telegram Test Server lease does not provide a Guest Mode-capable SUT bot.",
+    };
+    if (args.output) writePrivateJson(resolve(args.output), blocked);
+    console.log(JSON.stringify(blocked, null, 2));
+    return 2;
+  }
   const drained = await drainSutUpdates(creds.sutToken, lease);
   let selectedChatTarget = selectChatTarget({
     dm: args.dm,
+    guest: args.guest,
     explicitChat: args.chat,
     leasedGroupId: creds.groupId,
     sutUsername: sut.username,
@@ -1039,6 +1232,7 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
   const requestLog = evidenceDir
     ? path.join(evidenceDir, "mock-openai-requests.ndjson")
     : path.join(temp.root, "mock-openai-requests.ndjson");
+  const guestRunMarker = args.guest ? `guest-${randomUUID()}` : undefined;
   const outputPath = args.output ? resolve(args.output) : path.join(temp.root, "probe-result.json");
   const normalizedScenarioPath = args.scenario ? path.join(temp.root, "scenario.json") : "";
   const scenarioBarrierDir = args.scenario ? path.join(temp.root, "scenario-barriers") : "";
@@ -1054,7 +1248,8 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
   try {
     creds.assertLeaseHealthy();
     if (args.backend === "mock") {
-      fs.writeFileSync(requestLog, "");
+      fs.writeFileSync(requestLog, "", { mode: 0o600 });
+      fs.chmodSync(requestLog, 0o600);
       mock = spawnProcess(
         "node",
         [process.env.E2E_MOCK_SERVER_PATH || "scripts/e2e/mock-openai-server.mjs"],
@@ -1065,6 +1260,7 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
             MOCK_PORT: String(args.mockPort),
             MOCK_REQUEST_LOG: requestLog,
             SUCCESS_MARKER: process.env.E2E_TELEGRAM_MOCK_RESPONSE ?? "OPENCLAW_E2E_OK",
+            ...(guestRunMarker ? { HICKS_GUEST_RUN_MARKER: guestRunMarker } : {}),
           },
         },
       );
@@ -1133,7 +1329,7 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
       const gatewayArgs = args.sourceGateway
         ? ["--import", "tsx", "src/entry.ts", "gateway", "--port", String(args.gatewayPort)]
         : ["dist/entry.js", "gateway", "--port", String(args.gatewayPort)];
-      const child = spawnProcess(command, gatewayArgs, { cwd: repoRoot, env: gatewayEnv });
+      const child = spawnProcess(command, gatewayArgs, { cwd: runtimeRoot, env: gatewayEnv });
       try {
         return await waitForGatewayLeaseReady({
           child,
@@ -1154,12 +1350,23 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
 
     for (const text of args.preSend) {
       creds.assertLeaseHealthy();
-      const sent = await runCommand("uv", ["run", USER_DRIVER_PATH, "send", "--text", text], {
-        cwd: repoRoot,
-        env: driverEnv,
-        leaseFailure,
-        timeoutMs: args.timeoutMs,
-      });
+      const sent = await runCommand(
+        "uv",
+        [
+          "run",
+          USER_DRIVER_PATH,
+          "send",
+          "--text",
+          text,
+          ...(args.guest ? ["--chat", "self"] : []),
+        ],
+        {
+          cwd: repoRoot,
+          env: driverEnv,
+          leaseFailure,
+          timeoutMs: args.timeoutMs,
+        },
+      );
       if (sent.status !== 0 || sent.timedOut) {
         throw new Error(`pre-send failed: ${sent.stderr || sent.stdout}`);
       }
@@ -1462,6 +1669,19 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
     controlsStopped = true;
     await gatewayControl;
     const gatewayHealthSamples = await gatewayHealth;
+    const providerLog = readProviderRequestLog(requestLog);
+    const requestRows = providerLog.rows.length;
+    const guestProof = args.guest
+      ? readGuestProof({
+          recordPath: args.record,
+          apiRequests: creds.telegramProxy.getApiRequestEvents(),
+          guestIngressEvents: creds.telegramProxy.getGuestIngressEvents(),
+          providerRequests: providerLog.rows,
+          runMarker: guestRunMarker,
+          sutId: sut.id,
+          expectedText: process.env.E2E_TELEGRAM_MOCK_RESPONSE ?? "OPENCLAW_E2E_OK",
+        })
+      : undefined;
     if (recording && args.scenario) {
       const summary = readJson(outputPath);
       writePrivateJson(outputPath, {
@@ -1472,14 +1692,29 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
           gatewayActions,
           gatewayHealth: gatewayHealthSamples,
           telegramApiResponseHolds: creds.telegramProxy.getResponseHoldEvents(),
+          ...(guestProof ? { guestProof } : {}),
         },
       });
+    } else if (guestProof) {
+      const summary = readJson(outputPath);
+      writePrivateJson(outputPath, { ...summary, guestProof });
     }
     const actionFailed = gatewayActions.some((action) => action.status === "failed");
-    const exitCode = code === 0 && !actionFailed ? 0 : (code ?? 1) || 1;
-    const requestRows = countNdjsonRows(requestLog);
+    const exitCode =
+      code === 0 && !actionFailed && (!guestProof || guestProof.status === "passed")
+        ? 0
+        : (code ?? 1) || 1;
     const redactRunnerText = (text) =>
-      [creds.sutToken, tester.id, tester.username, sut.id, sut.username, temp.root, repoRoot]
+      [
+        creds.sutToken,
+        tester.id,
+        tester.username,
+        sut.id,
+        sut.username,
+        temp.root,
+        repoRoot,
+        runtimeRoot,
+      ]
         .filter(Boolean)
         .reduce((redacted, value) => redacted.replaceAll(String(value), "<redacted>"), text);
     console.log(
@@ -1496,6 +1731,7 @@ async function driveWithTelegramProxy(args, repoRoot, creds) {
           })),
           gatewayHealthSamples: gatewayHealthSamples.length,
           drainedUpdates: drained.drained,
+          ...(guestProof ? { guestProof } : {}),
           gatewayLogTail:
             exitCode === 0 ? "" : redactRunnerText((gateway?.output ?? "").slice(-4000)),
           mockLogTail: exitCode === 0 ? "" : redactRunnerText((mock?.output ?? "").slice(-2000)),
