@@ -318,7 +318,7 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
         return result;
       } catch (err) {
         runtime.error?.(danger(`telegram message processing failed: ${String(err)}`));
-        if (!spooledReplay) {
+        if (!spooledReplay && !(turnContext.responseTarget ?? options?.responseTarget)) {
           try {
             await bot.api.sendMessage(
               context.chatId,

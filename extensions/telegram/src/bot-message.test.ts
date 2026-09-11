@@ -372,6 +372,29 @@ describe("telegram bot message processor", () => {
     );
   });
 
+  it("leaves failure delivery to an alternate response target when dispatch throws", async () => {
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const responseTarget = { deliver: vi.fn(async () => true) };
+    const { processMessage, runtimeError, dispatchError } = createDispatchFailureHarness(
+      {
+        chatId: 123,
+        route: { sessionKey: "agent:main:main" },
+      },
+      sendMessage,
+    );
+
+    await expect(processSampleMessage(processMessage, { responseTarget })).resolves.toEqual({
+      kind: "failed-retryable",
+      error: dispatchError,
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(responseTarget.deliver).not.toHaveBeenCalled();
+    expect(runtimeError).toHaveBeenCalledWith(
+      "telegram message processing failed: Error: dispatch exploded",
+    );
+  });
+
   it("suppresses user-visible fallback while replaying a spooled update", async () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
     const { processMessage, runtimeError, dispatchError } = createDispatchFailureHarness(

@@ -142,9 +142,8 @@ export function registerTelegramGuestHandler(
     const guestCtx = ctx as unknown as GuestAnswerContext;
     const guestMessage = readGuestMessage(guestCtx);
     const guestQueryId = textValue(guestMessage?.guest_query_id);
-    // Incoming guest_message updates identify the caller and destination on the
-    // ordinary Message.from/chat fields. guest_bot_caller_* belongs to messages
-    // sent by a guest bot and must never gate ingress.
+    // Incoming guest_message identifies its caller on Message.from/chat;
+    // guest_bot_caller_* belongs to messages sent by a guest bot and never gates ingress.
     const caller = guestMessage?.from;
     const callerChat = guestMessage?.chat;
     const chatId = callerChat?.id;
@@ -273,7 +272,8 @@ export function registerTelegramGuestHandler(
           ctx: syntheticCtx,
           msg: syntheticMessage,
           allMedia: [],
-          storeAllowFrom: (params.telegramCfg.allowFrom ?? []).map((value) => String(value)),
+          // Carry the owner-authorized Guest sender through ordinary DM admission.
+          storeAllowFrom: [senderId],
           options: {
             responseTarget,
           },
