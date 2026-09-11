@@ -9,6 +9,7 @@ import { finalizeHicksLiveAcceptance } from "./hicks-deploy-runtime.mjs";
 
 const CONTOURS = Object.freeze(["guest", "delegation-parallel", "no-fake-progress"]);
 const MAX_ARTIFACT_BYTES = 64 * 1024;
+const MAX_WORKBOARD_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const SECRET_KEY = /(?:token|secret|password|credential|cookie|authorization|api[_-]?key)/iu;
 const TRACKED_GUEST_RUNNER = path.resolve(
@@ -131,7 +132,7 @@ async function readWorkboard({ entry, boardId, execute, env, timeoutMs }) {
       JSON.stringify({ boardId }),
       "--json",
     ],
-    { env, timeoutMs },
+    { env, timeoutMs, maxOutputBytes: MAX_WORKBOARD_OUTPUT_BYTES },
   );
   const payload = parseJsonOutput(result, "Workboard cards.list");
   if (!payload || !Array.isArray(payload.cards)) {

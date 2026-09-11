@@ -163,13 +163,23 @@ describe("Hicks post-deploy live acceptance", () => {
 
   it("fails closed when deployed runtime, Gateway, Workboard, or Telegram doctor is absent", async () => {
     const proofDir = await tempProofDir();
+    const execute = async (
+      _command: string,
+      args: string[],
+      options?: { maxOutputBytes?: number },
+    ) => {
+      if (args.includes("workboard.cards.list")) {
+        expect(options?.maxOutputBytes).toBe(4 * 1024 * 1024);
+      }
+      return { status: 1, stdout: "", stderr: "missing" };
+    };
     const result = await runHicksLiveAcceptance(
       {
         installRoot: path.join(proofDir, "missing-install"),
         proofDir,
         nonce: "HICKS_LIVE_missing",
       },
-      { execute: async () => ({ status: 1, stdout: "", stderr: "missing" }) },
+      { execute },
     );
     expect(result.status).toBe("blocked");
     expect(result.completed).toBe(false);
