@@ -268,4 +268,40 @@ describe("buildTelegramMessageContext reactions", () => {
 
     expect(setMessageReaction).toHaveBeenCalledWith(1234, 34, [{ type: "emoji", emoji: "❤" }]);
   });
+
+  it("suppresses chat actions and reactions for an alternate response target", async () => {
+    const sendChatAction = vi.fn(async () => undefined);
+    const setMessageReaction = vi.fn(async () => undefined);
+    const { createStatusReactionController } = createStatusReactionControllerStub();
+
+    const ctx = await buildTelegramMessageContextForTest({
+      message: {
+        message_id: 34,
+        chat: { id: 1234, type: "private" },
+        date: 1_700_000_000,
+        text: "hello",
+        from: { id: 42, first_name: "Alice" },
+      },
+      options: { responseTarget: { deliver: vi.fn(async () => true) } },
+      cfg: {
+        agents: {
+          defaults: { model: "anthropic/claude-opus-4-5", workspace: "/tmp/openclaw" },
+        },
+        channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
+        messages: { ackReaction: "👀", statusReactions: { enabled: true } },
+      },
+      ackReactionScope: "direct",
+      botApi: { setMessageReaction },
+      sendChatActionHandler: { sendChatAction } as never,
+      runtime: { createStatusReactionController },
+    });
+
+    await ctx?.sendTyping();
+    await ctx?.sendRecordVoice();
+    expect(ctx?.ackReactionPromise).toBeNull();
+    expect(ctx?.statusReactionController).toBeNull();
+    expect(sendChatAction).not.toHaveBeenCalled();
+    expect(setMessageReaction).not.toHaveBeenCalled();
+    expect(createStatusReactionController).not.toHaveBeenCalled();
+  });
 });

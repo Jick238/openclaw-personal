@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerTelegramGuestHandler } from "./bot-handlers.guest.js";
 import type { TelegramMessagePipeline } from "./bot-handlers.message-pipeline.js";
 import type { RegisterTelegramHandlerParams } from "./bot-handlers.types.js";
@@ -68,6 +68,10 @@ function guestContext(params: {
 }
 
 describe("Telegram Guest Mode Hicks Front", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("builds a synthetic message for the ordinary Front and answers one generated article", async () => {
     const processMessageWithReplyChain = vi.fn<
       TelegramMessagePipeline["processMessageWithReplyChain"]
@@ -89,7 +93,10 @@ describe("Telegram Guest Mode Hicks Front", () => {
       expect.objectContaining({
         allMedia: [],
         storeAllowFrom: ["42"],
-        options: { responseTarget: expect.any(Object) },
+        options: expect.objectContaining({
+          responseTarget: expect.any(Object),
+          abortSignal: expect.any(AbortSignal),
+        }),
       }),
     );
     expect(ctx.answerGuestQuery).toHaveBeenCalledOnce();
@@ -196,6 +203,40 @@ describe("Telegram Guest Mode Hicks Front", () => {
     );
     expect(loggerInfo).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "result-skipped", updateId: 1 }),
+      "telegram guest turn not admitted",
+    );
+  });
+
+  it("aborts a slow Front turn and answers a visible blocker before Guest expires", async () => {
+    vi.useFakeTimers();
+    let dispatchSignal: AbortSignal | undefined;
+    const processMessageWithReplyChain = vi.fn<
+      TelegramMessagePipeline["processMessageWithReplyChain"]
+    >(
+      async ({ options }) =>
+        await new Promise((resolve) => {
+          dispatchSignal = (options as typeof options & { abortSignal?: AbortSignal })?.abortSignal;
+          dispatchSignal?.addEventListener(
+            "abort",
+            () => resolve({ kind: "failed-retryable" as const, error: dispatchSignal?.reason }),
+            { once: true },
+          );
+        }),
+    );
+    const { handlers, loggerInfo } = createParams(processMessageWithReplyChain);
+    const ctx = guestContext({ id: "guest-deadline", text: "slow request" });
+
+    const turn = handlers.get("guest_message")!(ctx);
+    await vi.advanceTimersByTimeAsync(12_000);
+    await turn;
+
+    expect(dispatchSignal?.aborted).toBe(true);
+    expect(ctx.answerGuestQuery).toHaveBeenCalledOnce();
+    expect(JSON.stringify(ctx.answerGuestQuery.mock.calls)).toContain(
+      "Не удалось обработать запрос",
+    );
+    expect(loggerInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "response-deadline", updateId: 1 }),
       "telegram guest turn not admitted",
     );
   });

@@ -11,6 +11,7 @@ import {
 const GUEST_QUERY_MAX_CHARS = 256;
 const GUEST_RESULT_MAX_CHARS = 4_096;
 const GUEST_FAILURE_TEXT = "Не удалось обработать запрос. Попробуйте ещё раз.";
+const GUEST_RESPONSE_DEADLINE_MS = 12_000;
 const GUEST_DEDUPE_TTL_MS = 10 * 60 * 1_000;
 const GUEST_DEDUPE_MAX_ENTRIES = 1_024;
 
@@ -268,16 +269,44 @@ export function registerTelegramGuestHandler(
           }
           await responseTarget.deliver(GUEST_FAILURE_TEXT);
         };
-        const result = await messagePipeline.processMessageWithReplyChain({
-          ctx: syntheticCtx,
-          msg: syntheticMessage,
-          allMedia: [],
-          // Carry the owner-authorized Guest sender through ordinary DM admission.
-          storeAllowFrom: [senderId],
-          options: {
-            responseTarget,
-          },
+        const abortController = new AbortController();
+        let deadlineReached = false;
+        let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+        const deadlineResult = new Promise<{
+          kind: "failed-retryable";
+          error: Error;
+        }>((resolve) => {
+          deadlineTimer = setTimeout(() => {
+            deadlineReached = true;
+            const error = new Error("telegram guest response deadline exceeded");
+            abortController.abort(error);
+            resolve({ kind: "failed-retryable", error });
+          }, GUEST_RESPONSE_DEADLINE_MS);
         });
+        let result;
+        try {
+          const processing = messagePipeline.processMessageWithReplyChain({
+            ctx: syntheticCtx,
+            msg: syntheticMessage,
+            allMedia: [],
+            // Carry the owner-authorized Guest sender through ordinary DM admission.
+            storeAllowFrom: [senderId],
+            options: {
+              responseTarget,
+              abortSignal: abortController.signal,
+            },
+          });
+          result = await Promise.race([processing, deadlineResult]);
+        } finally {
+          if (deadlineTimer) {
+            clearTimeout(deadlineTimer);
+          }
+        }
+        if (deadlineReached) {
+          recordDrop("response-deadline");
+          await deliverFailure();
+          return;
+        }
         if (result.kind !== "completed") {
           recordDrop(`result-${result.kind}`);
           await deliverFailure();

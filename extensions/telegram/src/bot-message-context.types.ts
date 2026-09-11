@@ -40,6 +40,7 @@ export type TelegramAlternateFinalResponseTarget = {
 
 export type TelegramMessageContextOptions = {
   responseTarget?: TelegramAlternateFinalResponseTarget;
+  abortSignal?: AbortSignal;
   threadSpec?: TelegramThreadSpec;
   commandSource?: "text" | "native";
   forceWasMentioned?: boolean;

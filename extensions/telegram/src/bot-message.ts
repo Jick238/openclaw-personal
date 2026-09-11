@@ -297,6 +297,7 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
           retryDispatchErrors: spooledReplay,
           suppressFailureFallback: spooledReplay,
           responseTarget: turnContext.responseTarget ?? options?.responseTarget,
+          abortSignal: options?.abortSignal,
           turnAdoptionLifecycle: params.turnAdoptionLifecycle,
         });
         if (dispatchResult?.kind === "failed-retryable") {

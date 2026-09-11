@@ -329,7 +329,7 @@ export const buildTelegramMessageContext = async ({
   }
 
   const sendTyping = async () => {
-    if (threadSpec.scope === "direct-messages") {
+    if (options?.responseTarget || threadSpec.scope === "direct-messages") {
       return;
     }
     await withTelegramApiErrorLogging({
@@ -344,7 +344,7 @@ export const buildTelegramMessageContext = async ({
   };
 
   const sendRecordVoice = async () => {
-    if (threadSpec.scope === "direct-messages") {
+    if (options?.responseTarget || threadSpec.scope === "direct-messages") {
       return;
     }
     try {
@@ -547,13 +547,14 @@ export const buildTelegramMessageContext = async ({
     sessionRuntime,
   });
   const isRoomEvent = ctxPayload.InboundEventKind === "room_event";
-  const canShowStatusReaction = !isRoomEvent;
+  const canShowStatusReaction = !isRoomEvent && !options?.responseTarget;
   const ackReaction = resolveAckReaction(cfg, route.agentId, {
     channel: "telegram",
     accountId: account.accountId,
   });
   const ackReactionEmoji = ackReaction ? resolveTelegramReactionEmoji(ackReaction) : undefined;
   const shouldSendAckReaction = Boolean(
+    !options?.responseTarget &&
     ackReaction &&
     shouldAckReactionGate({
       scope: ackReactionScope,

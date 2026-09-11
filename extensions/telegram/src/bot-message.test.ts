@@ -241,6 +241,23 @@ describe("telegram bot message processor", () => {
     expect(dispatchTelegramMessage.mock.calls[0]?.[0]?.telegramCfg).toBe(turnTelegramCfg);
   });
 
+  it("passes an alternate-response deadline signal into dispatch", async () => {
+    const abortController = new AbortController();
+    buildTelegramMessageContext.mockResolvedValue(createMessageContext());
+    const processMessage = createTelegramMessageProcessor(baseDeps);
+
+    await expect(
+      processSampleMessage(processMessage, undefined, {}, {
+        responseTarget: { deliver: vi.fn(async () => true) },
+        abortSignal: abortController.signal,
+      } as never),
+    ).resolves.toEqual({ kind: "completed" });
+
+    expect(dispatchTelegramMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ abortSignal: abortController.signal }),
+    );
+  });
+
   it("runs the dispatch-start lifecycle after context creation and before dispatch", async () => {
     const sendTyping = vi.fn().mockResolvedValue(undefined);
     const onDispatchStart = vi.fn(async () => undefined);

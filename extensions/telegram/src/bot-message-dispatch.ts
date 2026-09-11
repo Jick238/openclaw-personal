@@ -293,6 +293,7 @@ export const dispatchTelegramMessage = async (
     retryDispatchErrors = false,
     suppressFailureFallback = false,
     responseTarget,
+    abortSignal,
     turnAdoptionLifecycle,
   } = dispatchParams;
   const dispatchStartedAt = Date.now();
@@ -322,7 +323,8 @@ export const dispatchTelegramMessage = async (
     (hookRunner?.hasHooks("reply_payload_sending") ?? false) ||
     (hookRunner?.hasHooks("message_sending") ?? false)
   );
-  const isDispatchSuperseded = () => turnAdoptionLifecycle?.abortSignal?.aborted === true;
+  const isDispatchSuperseded = () =>
+    abortSignal?.aborted === true || turnAdoptionLifecycle?.abortSignal?.aborted === true;
   const turnConfig = {
     ...dispatchParams,
     allowProviderPreview: responseTarget ? false : allowProviderPreview,

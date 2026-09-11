@@ -144,7 +144,7 @@ export async function runTelegramDispatchTurn(turn: Turn) {
           replyOptions: {
             skillFilter: context.skillFilter,
             disableBlockStreaming: turn.disableBlockStreaming,
-            abortSignal: turn.turnAdoptionLifecycle?.abortSignal,
+            abortSignal: turn.abortSignal ?? turn.turnAdoptionLifecycle?.abortSignal,
             turnAdoptionLifecycle: turn.turnAdoptionLifecycle
               ? {
                   admission: turn.turnAdoptionLifecycle.admission ?? "exclusive",

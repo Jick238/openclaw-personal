@@ -28,6 +28,7 @@ import type {
 
 export type DispatchTelegramMessageParams = {
   responseTarget?: TelegramAlternateFinalResponseTarget;
+  abortSignal?: AbortSignal;
   context: TelegramMessageContext;
   bot: Bot;
   cfg: OpenClawConfig;
