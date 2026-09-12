@@ -204,7 +204,9 @@ function buildWorkerPrompt(params: {
     "Heartbeat with workboard_heartbeat using the card id and token while working.",
     "When done, call workboard_complete with the card id, token, summary, and proof.",
     "If you recorded proof separately, pass its returned proofId to workboard_complete.",
-    "If blocked, call workboard_block with the card id, token, and reason.",
+    "A blocker is an external dependency or owner decision that remains after bounded safe recovery. Before blocking, inspect the failing command and its logs, identify the lifecycle owner, and execute every safe in-scope repair the card already authorizes.",
+    "A missing dependency, a running process holding installer files, or an apparently ambiguous version is not a blocker when the repository, installed manifest, or official release metadata provides a canonical choice. Do not report an installer launch as success; verify the required artifact and live behavior.",
+    "Only then, if genuinely blocked, call workboard_block with the card id, token, attempted repairs, evidence, and the exact external action required.",
     "",
     params.context,
   ].join("\n");

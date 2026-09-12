@@ -109,6 +109,7 @@ function orchestratorTask(params: {
     "The Workboard card and this native child session are the durable admission. Read and claim the parent card with the supplied token, then decompose the goal into bounded child cards.",
     "Use workboard_decompose with completeParent=false and independentChildren=true. Dispatch the resulting independent cards in parallel with native sessions_spawn, assigning configured agent ids and recording every child card before launch. Workers must heartbeat, complete or block their own cards, and include proof.",
     "For terminal proof, use the worker's available terminal tool in its actual workspace; do not pass a Linux /home path to a Windows node. If that terminal boundary is unavailable, record the typed blocker instead of claiming proof.",
+    "Audit every child blocker before accepting it. If logs, repository pins, installed manifests, or official release metadata identify a safe in-scope recovery, continue or redispatch that repair instead of escalating a false owner choice. An installer merely starting is not proof; require the requested artifact and live behavior.",
     "Do not send Telegram or other owner-facing messages. Do not declare the task complete from model memory. Reconcile child cards and terminal evidence in the parent card, complete the parent exactly once, and leave the Front requester to deliver the only final user message.",
     "",
     `Goal: ${params.goal}`,

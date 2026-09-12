@@ -139,6 +139,10 @@ describe("hicks_delegate admission boundary", () => {
         task: expect.stringContaining("sessions_spawn"),
       }),
     );
+    expect(spawnVisible.mock.calls[0]?.[0]?.task).toContain("Audit every child blocker");
+    expect(spawnVisible.mock.calls[0]?.[0]?.task).toContain(
+      "installer merely starting is not proof",
+    );
     const [parent] = await store.list();
     expect(parent?.metadata?.claim?.ownerId).toBe("hicks-orchestrator");
     await expect(store.block(parent!.id, {}, { ownerId: "main" })).rejects.toThrow(/claimed by/);
