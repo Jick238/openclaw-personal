@@ -58,7 +58,7 @@ import {
   normalizeStringList,
   removeUndefinedMetadataFields,
 } from "./store-normalizers.js";
-import { WorkboardPromoteStore } from "./store-promote.js";
+import { WorkboardRequestGroupStore } from "./store-request-groups.js";
 
 function assertClaimIdentity(claim: WorkboardClaim, input: WorkboardHeartbeatInput): void {
   const token = normalizeOptionalString(input.token);
@@ -71,7 +71,7 @@ function assertClaimIdentity(claim: WorkboardClaim, input: WorkboardHeartbeatInp
   }
 }
 
-export class WorkboardWorkflowStore extends WorkboardPromoteStore {
+export class WorkboardWorkflowStore extends WorkboardRequestGroupStore {
   async claim(
     id: string,
     input: WorkboardClaimInput,
@@ -248,11 +248,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     const createdCardIds = normalizeStringList(input.createdCardIds, "created card ids", 120);
     const childIds = cardChildIds(existing);
     const recordedCreatedCardIds = new Set(existing.metadata?.automation?.createdCardIds ?? []);
-    const manifestIds = new Set([
-      ...childIds,
-      ...recordedCreatedCardIds,
-      ...createdCardIds,
-    ]);
+    const manifestIds = new Set([...childIds, ...recordedCreatedCardIds, ...createdCardIds]);
     for (const createdCardId of manifestIds) {
       const createdCard = await this.get(createdCardId);
       if (!createdCard) {
@@ -266,10 +262,12 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
         throw new Error(`created card is not linked to this card: ${createdCardId}`);
       }
       const blockedHasReason =
-        createdCard.status === "blocked" &&
-        (createdCard.metadata?.comments?.length ?? 0) > 0;
-      if (existing.metadata?.automation?.requesterSessionKey &&
-          createdCard.status !== "done" && !blockedHasReason) {
+        createdCard.status === "blocked" && (createdCard.metadata?.comments?.length ?? 0) > 0;
+      if (
+        existing.metadata?.automation?.requesterSessionKey &&
+        createdCard.status !== "done" &&
+        !blockedHasReason
+      ) {
         throw new Error(`created card is not terminal: ${createdCardId}`);
       }
     }
@@ -640,7 +638,10 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
                         {
                           ...latestParent.metadata?.automation,
                           summary,
-                          createdCardIds: children.map((child) => child.id),
+                          createdCardIds: [
+                            ...(latestParent.metadata?.automation?.createdCardIds ?? []),
+                            ...children.map((child) => child.id),
+                          ].filter((cardId, index, ids) => ids.indexOf(cardId) === index),
                         },
                         latestParent.metadata?.automation,
                       ),

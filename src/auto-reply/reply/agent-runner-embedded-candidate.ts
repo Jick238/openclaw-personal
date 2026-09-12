@@ -136,6 +136,10 @@ export async function runEmbeddedFallbackCandidate(
           ...resolveMessageActionTurnCapabilityLifetime(runBaseParams.timeoutMs),
         })
       : undefined;
+  const workboardRequestGroupId = embeddedContext.currentSourceTurnId;
+  const runToolBindings = workboardRequestGroupId
+    ? { ...runBaseParams.toolBindings, "workboard.requestGroupId": workboardRequestGroupId }
+    : runBaseParams.toolBindings;
   let attemptCompactionCount = 0;
   let postCompactionModelAttempted = false;
   let compactionAccounting: CompactionAccountingFact | undefined;
@@ -177,6 +181,7 @@ export async function runEmbeddedFallbackCandidate(
         groupSpace: normalizeOptionalString(turn.sessionCtx.GroupSpace),
         ...senderContext,
         ...runBaseParams,
+        ...(runToolBindings ? { toolBindings: runToolBindings } : {}),
         contextWindow: turn.getActiveSessionEntry()?.contextWindow,
         lane: params.runLane,
         provider: embeddedRunProvider,

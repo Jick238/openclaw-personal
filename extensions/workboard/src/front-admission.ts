@@ -29,6 +29,7 @@ function requireFrontContext(ctx: OpenClawPluginToolContext | undefined): {
     to: string;
     threadId?: string | number;
   };
+  requestGroupId?: string;
 } {
   const agentId = contextOwner(ctx);
   const channel = ctx?.deliveryContext?.channel?.trim().toLowerCase();
@@ -57,6 +58,10 @@ function requireFrontContext(ctx: OpenClawPluginToolContext | undefined): {
         ? { threadId: ctx.deliveryContext.threadId }
         : {}),
     },
+    ...(typeof ctx?.toolBindings?.["workboard.requestGroupId"] === "string" &&
+    ctx.toolBindings["workboard.requestGroupId"].trim()
+      ? { requestGroupId: ctx.toolBindings["workboard.requestGroupId"].trim() }
+      : {}),
   };
 }
 
@@ -117,6 +122,7 @@ export type FrontAdmissionInput = {
   sessionKey: string;
   goal: string;
   idempotencyKey: string;
+  requestGroupId?: string;
   requesterOrigin: {
     channel: "telegram";
     accountId?: string;
@@ -190,16 +196,64 @@ export async function admitFrontTask(input: FrontAdmissionInput) {
   // the requester binding used for control and delivery, but cannot mutate the
   // execution card with a different owner identity.
   const ownerId = ORCHESTRATOR_AGENT_ID;
-  const initial = await input.store.create({
-    title: `Hicks task: ${input.goal.slice(0, 160)}`,
-    notes: input.goal,
-    status: "ready",
-    agentId: ORCHESTRATOR_AGENT_ID,
-    boardId: FRONT_BOARD_ID,
-    requesterSessionKey: input.sessionKey,
-    idempotencyKey: input.idempotencyKey,
-    tenant: "hicks-front",
-  });
+  let initial: WorkboardCard;
+  if (input.requestGroupId) {
+    const reserved = await input.store.reserveFrontRequestGroup({
+      parent: {
+        title: `Hicks task: ${input.goal.slice(0, 160)}`,
+        notes: input.goal,
+        status: "ready",
+        agentId: ORCHESTRATOR_AGENT_ID,
+        idempotencyKey: input.idempotencyKey,
+      },
+      child: {
+        title: `Hicks related task: ${input.goal.slice(0, 160)}`,
+        notes: input.goal,
+        status: "ready",
+        idempotencyKey: input.idempotencyKey,
+      },
+      tenant: "hicks-front",
+      boardId: FRONT_BOARD_ID,
+      requesterSessionKey: input.sessionKey,
+      requestGroupId: input.requestGroupId,
+    });
+    initial = reserved.parent;
+    if (!reserved.created) {
+      if (reserved.child) {
+        return {
+          status: "accepted" as const,
+          accepted: true as const,
+          duplicate: true as const,
+          grouped: true as const,
+          card: redactClaimToken(reserved.parent),
+          childCard: redactClaimToken(reserved.child),
+          parentSessionKey: input.sessionKey,
+          ...(reserved.parent.sessionKey ? { childSessionKey: reserved.parent.sessionKey } : {}),
+          ...(reserved.parent.runId ? { runId: reserved.parent.runId } : {}),
+        };
+      }
+      return {
+        status: "accepted" as const,
+        accepted: true as const,
+        duplicate: true as const,
+        card: redactClaimToken(reserved.parent),
+        parentSessionKey: input.sessionKey,
+        ...(reserved.parent.sessionKey ? { childSessionKey: reserved.parent.sessionKey } : {}),
+        ...(reserved.parent.runId ? { runId: reserved.parent.runId } : {}),
+      };
+    }
+  } else {
+    initial = await input.store.create({
+      title: `Hicks task: ${input.goal.slice(0, 160)}`,
+      notes: input.goal,
+      status: "ready",
+      agentId: ORCHESTRATOR_AGENT_ID,
+      boardId: FRONT_BOARD_ID,
+      requesterSessionKey: input.sessionKey,
+      idempotencyKey: input.idempotencyKey,
+      tenant: "hicks-front",
+    });
+  }
   if (initial.sessionKey && initial.runId) {
     return {
       status: "accepted" as const,
@@ -207,8 +261,8 @@ export async function admitFrontTask(input: FrontAdmissionInput) {
       duplicate: true as const,
       card: redactClaimToken(initial),
       parentSessionKey: input.sessionKey,
-      childSessionKey: initial.sessionKey,
-      runId: initial.runId,
+      ...(initial.sessionKey ? { childSessionKey: initial.sessionKey } : {}),
+      ...(initial.runId ? { runId: initial.runId } : {}),
     };
   }
   if (initial.status === "done" || initial.status === "blocked") {
@@ -346,6 +400,10 @@ export function createFrontAdmissionTool(params: {
       const record = asNonArrayRecord(rawParams);
       const goal = boundedText(record.goal, "goal", 4000);
       const idempotencyKey = boundedText(record.idempotencyKey, "idempotencyKey", 128);
+      const requestGroupId =
+        typeof params.context?.toolBindings?.["workboard.requestGroupId"] === "string"
+          ? params.context.toolBindings["workboard.requestGroupId"].trim() || undefined
+          : undefined;
       return jsonResult(
         await admitFrontTask({
           api: params.api,
@@ -354,6 +412,7 @@ export function createFrontAdmissionTool(params: {
           sessionKey,
           goal,
           idempotencyKey,
+          requestGroupId,
           requesterOrigin,
         }),
       );

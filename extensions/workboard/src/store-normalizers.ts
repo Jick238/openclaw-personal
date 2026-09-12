@@ -437,6 +437,12 @@ export function normalizeAutomation(
     400,
     "requester session key",
   );
+  const requestGroupId = normalizeBoundedString(
+    record.requestGroupId,
+    fallback.requestGroupId,
+    200,
+    "request group id",
+  );
   const createdByCardId = normalizeBoundedString(
     record.createdByCardId,
     fallback.createdByCardId,
@@ -483,6 +489,7 @@ export function normalizeAutomation(
     ...(tenant ? { tenant } : {}),
     ...(boardId ? { boardId } : {}),
     ...(requesterSessionKey ? { requesterSessionKey } : {}),
+    ...(requestGroupId ? { requestGroupId } : {}),
     ...(createdByCardId ? { createdByCardId } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(skills?.length ? { skills } : {}),
@@ -1233,6 +1240,7 @@ function removeUndefinedAutomationFields(automation: WorkboardAutomation): Workb
     "tenant",
     "boardId",
     "requesterSessionKey",
+    "requestGroupId",
     "createdByCardId",
     "idempotencyKey",
     "skills",

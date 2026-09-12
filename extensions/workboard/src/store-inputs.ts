@@ -26,6 +26,7 @@ type WorkboardCardInput = {
   tenant?: unknown;
   boardId?: unknown;
   requesterSessionKey?: unknown;
+  requestGroupId?: unknown;
   createdByCardId?: unknown;
   idempotencyKey?: unknown;
   skills?: unknown;

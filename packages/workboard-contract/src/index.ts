@@ -275,6 +275,8 @@ export type WorkboardAutomation = {
   boardId?: string;
   /** Stable Front session binding used for owner control of admitted work. */
   requesterSessionKey?: string;
+  /** Stable source-turn group binding shared by related Front admissions. */
+  requestGroupId?: string;
   createdByCardId?: string;
   idempotencyKey?: string;
   skills?: string[];

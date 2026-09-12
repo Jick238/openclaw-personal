@@ -801,6 +801,7 @@ export class WorkboardCoreStore {
       "tenant",
       "boardId",
       "requesterSessionKey",
+      "requestGroupId",
       "createdByCardId",
       "idempotencyKey",
       "skills",

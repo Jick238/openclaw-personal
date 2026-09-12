@@ -24,12 +24,13 @@ function createMemoryStore<T = unknown>() {
   };
 }
 
-function ownerContext() {
+function ownerContext(requestGroupId?: string) {
   return {
     agentId: "main",
     senderIsOwner: true,
     deliveryContext: { channel: "telegram", accountId: "work", to: "telegram:42" },
     sessionKey: "agent:main:telegram:direct:42",
+    ...(requestGroupId ? { toolBindings: { "workboard.requestGroupId": requestGroupId } } : {}),
   } satisfies OpenClawPluginToolContext;
 }
 
@@ -168,6 +169,83 @@ describe("hicks_delegate admission boundary", () => {
     ).resolves.toMatchObject({ content: [expect.objectContaining({ type: "text" })] });
 
     expect((await store.list()).filter((card) => card.status === "running")).toHaveLength(2);
+  });
+
+  it("groups related Front admissions into one parent and one native wake", async () => {
+    const spawnVisible = vi.fn().mockResolvedValue({
+      status: "accepted",
+      childSessionKey: "agent:hicks-orchestrator:dashboard:group",
+      runId: "run-group",
+    });
+    const store = new WorkboardStore(createMemoryStore());
+    const api = integrationApi({ spawnVisible });
+    const context = ownerContext("channel-user:v1:group-1");
+    const tool = createFrontAdmissionTool({ api, context, store });
+
+    await Promise.all([
+      tool.execute("event-call", { goal: "create the event", idempotencyKey: "group-event-1" }),
+      tool.execute("reminder-call", {
+        goal: "create the reminder",
+        idempotencyKey: "group-reminder-1",
+      }),
+    ]);
+    const cards = await store.list();
+    const parents = cards.filter((card) => !card.metadata?.automation?.createdByCardId);
+    const children = cards.filter((card) => card.metadata?.automation?.createdByCardId);
+
+    expect(spawnVisible).toHaveBeenCalledOnce();
+    expect(parents).toHaveLength(1);
+    expect(children).toHaveLength(1);
+    expect(children[0]?.metadata?.automation?.requestGroupId).toBe("channel-user:v1:group-1");
+    expect([parents[0]?.notes, children[0]?.notes]).toEqual(
+      expect.arrayContaining(["create the event", "create the reminder"]),
+    );
+    expect(parents[0]?.metadata?.automation?.createdCardIds).toEqual([children[0]?.id]);
+  });
+
+  it("keeps a terminal grouped child idempotent and preserves independent groups", async () => {
+    const spawnVisible = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "accepted",
+        childSessionKey: "agent:hicks-orchestrator:dashboard:group-a",
+        runId: "run-group-a",
+      })
+      .mockResolvedValueOnce({
+        status: "accepted",
+        childSessionKey: "agent:hicks-orchestrator:dashboard:group-b",
+        runId: "run-group-b",
+      });
+    const store = new WorkboardStore(createMemoryStore());
+    const api = integrationApi({ spawnVisible });
+    const first = createFrontAdmissionTool({ api, context: ownerContext("group-a"), store });
+    const second = createFrontAdmissionTool({ api, context: ownerContext("group-b"), store });
+
+    await first.execute("call", { goal: "event", idempotencyKey: "group-a-event" });
+    const grouped = await first.execute("call", {
+      goal: "reminder",
+      idempotencyKey: "group-a-reminder",
+    });
+    const groupedPayload = JSON.parse(String(grouped.content[0]?.text)) as {
+      childCard?: { id?: string };
+    };
+    const childId = groupedPayload.childCard?.id;
+    expect(childId).toBeTruthy();
+    const childClaim = await store.claim(childId!, { ownerId: "worker" });
+    await store.complete(
+      childId!,
+      { summary: "terminal child" },
+      { ownerId: "worker", token: childClaim.token },
+    );
+    await first.execute("call", { goal: "reminder", idempotencyKey: "group-a-reminder" });
+    await second.execute("call", { goal: "independent", idempotencyKey: "group-b-event" });
+
+    const cards = await store.list();
+    expect(spawnVisible).toHaveBeenCalledTimes(2);
+    expect(cards.filter((card) => !card.metadata?.automation?.createdByCardId)).toHaveLength(2);
+    expect(
+      cards.filter((card) => card.metadata?.automation?.requestGroupId === "group-a"),
+    ).toHaveLength(2);
   });
 
   it("reuses the durable card when the same inline admission is retried", async () => {
